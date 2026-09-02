@@ -1,0 +1,45 @@
+[project]
+name = "predict-customer-churn"
+version = "0.1.0"
+description = "Local-first Kaggle competition setup"
+requires-python = ">=3.11,<3.13"
+dependencies = [
+    # core
+    "pandas>=2.0",
+    "numpy>=1.24",
+    "scipy>=1.10",
+    "scikit-learn>=1.3",
+    # gradient boosting
+    "lightgbm>=4.0",
+    "xgboost>=2.0",
+    "catboost>=1.2",
+    # viz
+    "matplotlib>=3.7",
+    "seaborn>=0.12",
+    # explainability — usually worth more judging points than 3 more of AUC
+    "shap>=0.44",
+    # tuning
+    "optuna>=3.5",
+    # notebooks + hygiene
+    "jupyter",
+    "ipykernel",
+    "nbstripout",
+    # kaggle api
+    "kaggle",
+]
+
+# src/ is imported as a namespace package from the repo root (python -m src.train),
+# not installed into site-packages, so uv manages dependencies only.
+[tool.uv]
+package = false
+
+[dependency-groups]
+dev = [
+    "pre-commit>=4.6.2",
+]
+
+[tool.ruff]
+line-length = 100
+
+[tool.ruff.lint]
+ignore = ["E501", "E741"]   # long lines, ambiguous names like `l`

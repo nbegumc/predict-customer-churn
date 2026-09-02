@@ -1,0 +1,32 @@
+# data — never commit
+data/raw/*
+data/interim/*
+data/processed/*
+!data/**/.gitkeep
+
+# artifacts
+experiments/*.npy
+experiments/*.json
+experiments/*.csv
+submissions/*.csv
+!**/.gitkeep
+
+# secrets
+kaggle.json
+.env
+
+# python / uv
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+# uv.lock is committed on purpose — it pins the shared environment
+# generated only for Kaggle kernels, via `make requirements`
+requirements.txt
+.ipynb_checkpoints/
+.pytest_cache/
+*.egg-info/
+
+# os
+.DS_Store
+Thumbs.db
