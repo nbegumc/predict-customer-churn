@@ -103,7 +103,10 @@ def blend(run_ids: list[str]):
     save_oof(run_id, oof_full, test_pred, {"members": run_ids, "weights": w.tolist()})
 
     sub = load_sample_submission()
-    sub[C.TARGET] = test_pred
+    # same reason as in train.py: sample_submission is read raw and keeps the
+    # competition's casing ("Churn"), while C.TARGET is lower-cased ("churn").
+    (sub_target,) = [c for c in sub.columns if c != C.ID_COL]
+    sub[sub_target] = test_pred
     sub_path = C.SUBMISSIONS / f"sub_{run_id}_{blended:.5f}.csv"
     sub.to_csv(sub_path, index=False)
     print(f"submission -> {sub_path}")
