@@ -8,9 +8,9 @@ path and no notebook disagrees with a script.
 from pathlib import Path
 
 # --- competition -----------------------------------------------------------
-COMPETITION = "predict-customer-churn"  # TODO confirm: must match the slug in the comp URL
-TARGET = "target"  # TODO confirm against data/raw/train.csv header
-ID_COL = "id"  # TODO confirm against data/raw/sample_submission.csv header
+COMPETITION = "playground-series-s6e3"
+TARGET = "Churn"  # TODO confirm against data/raw/train.csv header
+ID_COL = "id"
 TASK = "binary"  # "binary" | "multiclass" | "regression"
 METRIC = "auc"  # "auc" | "logloss" | "accuracy" | "f1" | "rmse" | "mae" | "rmsle"
 
