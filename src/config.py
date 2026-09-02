@@ -9,7 +9,7 @@ from pathlib import Path
 
 # --- competition -----------------------------------------------------------
 COMPETITION = "playground-series-s6e3"
-TARGET = "Churn"  # TODO confirm against data/raw/train.csv header
+TARGET = "churn"  # lower-case: basic_clean lower-cases every header
 ID_COL = "id"
 TASK = "binary"  # "binary" | "multiclass" | "regression"
 METRIC = "auc"  # "auc" | "logloss" | "accuracy" | "f1" | "rmse" | "mae" | "rmsle"
@@ -34,12 +34,15 @@ SEED = 42
 #   "time_coldstart" - expanding window in time, AND a slice of entities held
 #                      out of training entirely, so validation reproduces the
 #                      share of test rows whose entity has no history
-# PROVISIONAL — NOT YET DECIDED. The test set has not been released, so how it
-# was built is unknown. "stratified" is a placeholder that is merely valid for
-# binary classification; it is not evidence-backed. Before the first
-# `make baseline`, measure the released test set and set this from the table in
-# experiments.md -> Validation decision. Once any run exists it is frozen: every
-# oof_*.npy carries the fingerprint and blend.py refuses on a mismatch.
+# DECIDED 2026-09-02 by notebooks/01_eda.ipynb — FROZEN. The value is unchanged
+# from the placeholder, but it is now measured rather than assumed: id is unique
+# and contiguous in both frames, there is no date column and id order carries no
+# time signal, no feature vector repeats (so there is no entity to group or hold
+# out cold), and adversarial validation of train vs. test scores AUC 0.5117 — the
+# two frames are the same distribution. The test set is a random 30% slice, so
+# stratified folds mirror it. Full numbers in experiments.md -> Validation
+# decision. Frozen from here: every oof_*.npy carries the fold fingerprint
+# (13feb807) and blend.py refuses on a mismatch.
 CV_SCHEME = "stratified"
 N_FOLDS = 5
 GROUP_COL = ""  # required when CV_SCHEME == "group" | "time_coldstart"

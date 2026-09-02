@@ -67,7 +67,12 @@ def run(model: str = "lgbm", notes: str = "", params: dict | None = None):
     save_oof(run_id, oof, test_pred, params)
 
     sub = load_sample_submission()
-    sub[C.TARGET] = test_pred
+    # sample_submission is read raw, so its header keeps the competition's own
+    # casing ("Churn") while C.TARGET is lower-cased ("churn"). Assigning by
+    # C.TARGET would append a second column and leave the real one all-zeros —
+    # a file that uploads cleanly and scores 0.5. Write the column the file has.
+    (sub_target,) = [c for c in sub.columns if c != C.ID_COL]
+    sub[sub_target] = test_pred
     sub_path = C.SUBMISSIONS / f"sub_{run_id}_{cv_score:.5f}.csv"
     sub.to_csv(sub_path, index=False)
     print(f"submission -> {sub_path}")

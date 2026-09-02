@@ -17,44 +17,101 @@ the same day. An unlogged submission is a slot spent for nothing.
 
 ## Validation decision
 
-- CV scheme: **UNDECIDED.** `src/config.py` currently holds `CV_SCHEME =
-  "stratified"`, `N_FOLDS = 5` as a *placeholder* — valid for binary
-  classification, but chosen with no evidence about the test split.
+- CV scheme: **`stratified`, 5 folds — DECIDED and FROZEN (2026-09-02).**
+  `src/config.py` already held this as a placeholder; `notebooks/01_eda.ipynb`
+  measured the split and the placeholder turned out to be right. It is now
+  evidence-backed, not a default.
 - Task: binary classification. Metric: **ROC-AUC** between predicted probability
   and observed target (`cv.score` -> `roc_auc_score`, greater is better).
-- Why it is open: the test set has not been released, so how it was built is
-  unknown. Guessing costs more than waiting — the scheme freezes the moment the
-  first run writes an `oof_*.npy`.
+- `GROUP_COL` and `TIME_COL` stay empty. `COLD_FRACTION` is **not applicable** —
+  see below, there is no entity to be cold.
 
-### Settle this before the first `make baseline`
+### What was measured
 
-Load train and test and **measure**, do not assume:
+Dataset: `playground-series-s6e3`, a synthetic expansion of the Telco churn
+table. train 594,194 x 21, test 254,655 x 20 — test is exactly 30.0% of the
+combined rows. 19 features: 4 numeric (`seniorcitizen`, `tenure`,
+`monthlycharges`, `totalcharges`), 15 categorical at 2-4 levels each.
 
-1. **Row granularity** — is `ID_COL` unique in train? If a customer appears in
-   several rows, random folds leak that customer across the split.
-2. **Time** — is there a date column? Compare `train[TIME_COL].max()` against
-   `test[TIME_COL].min()`. If test starts after train ends, the split is
-   temporal and random folds are measuring the wrong thing.
-3. **Entity overlap** — the share of test customers that never appear in train:
-   `(~test[cust].isin(train[cust])).mean()`. This is the number that separates
-   `group` from `time` from `time_coldstart`.
+1. **Row granularity.** `id` is unique in both frames, contiguous
+   (train 0-594,193, test 594,194-848,848), and the two ranges do not overlap.
+   Test simply continues the train counter.
+2. **Time.** No date column exists, and none can be derived. `id` order is the
+   only possible carrier of time, and it does not carry it:
+   `corr(id, churn) = -0.013` and `corr(id, tenure) = +0.019` inside train —
+   detectable at n=594k, negligible in size — and the tenure trend *fails to
+   continue into test* (`corr(id, tenure) = +0.005` there). The first 2-3 id
+   ventiles sit slightly high (churn ~0.25 vs ~0.22 for the rest), which is a
+   head-of-file artefact, not a temporal ordering.
+3. **Entity overlap.** There is no `customerid` column. All 594,194 train
+   feature vectors are distinct (0 duplicates), and 0.00% of sampled test
+   feature vectors appear in train. There is no repeated entity anywhere, so
+   `group` and `time_coldstart` are not merely unnecessary — there is nothing
+   to group by.
+4. **Adversarial validation** (LightGBM, train vs. test on features alone,
+   5-fold): **AUC = 0.5117**. With ~849k rows the SE is ~0.0007, so this is
+   measurably above 0.5 and practically indistinguishable from it. No
+   categorical marginal differs by more than 0.8pp between the frames; every
+   numeric mean is within 0.03 SD.
+5. **Unseen levels.** None. Every categorical level present in test also occurs
+   in train.
+6. **Missingness.** Zero missing cells in either frame. `totalcharges` parsed
+   cleanly as float — the classic Telco blank-string-at-tenure-0 trap is absent
+   because there are no tenure-0 rows.
 
-Then set `CV_SCHEME` from what you measured:
+### The conclusion in one sentence
 
-| Measurement | `CV_SCHEME` |
-|---|---|
-| one row per customer, no time signal | `stratified` |
-| test is a later time window | `time` (set `TIME_COL`) |
-| whole customers held out, several rows each | `group` (set `GROUP_COL`) |
-| later window **and** customers unseen in train | `time_coldstart` (set both; calibrate `COLD_FRACTION`) |
+The test set is a random 30% slice of one synthetic table: one row per customer,
+no time column, no repeated entity, no distribution shift.
 
-Record the actual numbers here — row counts, date ranges, measured overlap —
-not the assumption. Then note the consequences: do the folds partition the rows?
-Are any rows never validated? Does the OOF over- or under-represent a slice of
-test?
+Hence `stratified`. Stratified rather than plain `kfold` because the positive
+rate is 22.5%; at 5 folds the difference is small, but stratifying removes
+fold-to-fold class-balance variation as a noise source at no cost. Realised
+folds: 118,838-118,839 rows each, positive rate 0.22520-0.22521 across all five.
+Fold fingerprint `13feb807`.
+
+### Consequences
+
+- The folds **partition the rows**: every training row is validated exactly
+  once, the OOF array has no NaNs, and `cv.add_fold_column` is valid here.
+- OOF and test are drawn from the same distribution, so CV should track the
+  public LB closely. A CV-LB gap would indicate a bug, not a shift.
+- Noise, measured on fold 0 at AUC ~0.915 (bootstrap, 400 resamples; derivation
+  and worked example in `learnings.md`): **+/-0.00085 on a single run's fold
+  score**, but only **+/-0.000053 on a paired difference between two runs**, and
+  **+/-0.000052 across seeds** for the same config. Runs share identical folds,
+  so comparisons are paired and roughly **16x** more precise than either
+  absolute score. (Hanley-McNeil predicts +/-0.0012 per fold — conservative by
+  ~1.4x; prefer the bootstrap.)
+- So the test is not one threshold. Cheap version, free on every run:
+  **do the per-fold differences agree in sign?** +0.0003 positive in 5/5 folds
+  is real; +0.002 positive in 3/5 is one lucky fold. And anything smaller than
+  the ~0.00005 seed spread is not a result — it is the seed.
 
 - **Frozen once decided.** Changing it invalidates every saved `oof_*.npy`; the
   fingerprint in `experiments.csv` is what enforces this.
+
+## Name/dtype mismatches found by the EDA — fixed 2026-09-02
+
+Three of them sat between the EDA and a working submission. All fixed; the folds
+are unchanged by the fix (fingerprint still `13feb807`).
+
+1. `config.TARGET` was `"Churn"`, which never matches a column — `basic_clean`
+   lower-cases the headers, so `train[C.TARGET]` in `train.py` raised
+   `KeyError`. Now `"churn"`.
+2. The label was the strings `"Yes"`/`"No"`. `train.py` passed `y_raw` straight
+   to LightGBM and to `roc_auc_score`, neither of which takes text. New
+   `data.encode_target` maps it to int8 via `TARGET_MAP`, asserts nothing falls
+   outside the map, and runs *after* `reduce_memory` — which would otherwise
+   widen the int8 back to int32.
+3. `load_sample_submission` does not call `basic_clean`, so the frame keeps
+   `Churn` while `C.TARGET` is `churn`. `sub[C.TARGET] = test_pred` *added* a
+   second column and left `Churn` all-zeros. `train.py` now writes whichever
+   column is not `ID_COL`, so the header the competition expects survives
+   whatever its casing.
+
+The third is the dangerous one: the other two crash, this one succeeds and
+silently spends a submission slot on a 0.5.
 
 ## Runs
 
@@ -73,4 +130,4 @@ Anything tried that did not work, so it is not tried twice. One row each.
 
 | What | Why it failed | Run |
 |---|---|---|
-| | | |
+| Assigning the submission column by `C.TARGET` | `sample_submission.csv` is read raw and keeps `Churn`; `C.TARGET` is lower-cased `churn`, so the assignment appends a column and leaves the real one all-zeros. Uploads cleanly, scores 0.5. | pre-baseline |
