@@ -214,8 +214,13 @@ silently spends a submission slot on a 0.5.
   weight on a 2-simplex fitted to 594k rows has nowhere to overfit. The
   per-fold weights are stable too (0.539-0.579). Rank-averaging scores
   identically to probability-averaging (0.916563), as it must at r=0.997.
-- **Keep / drop:** keep. Best CV in the repo, and the honest estimate is the
-  same as the fitted one.
+- **LB (2026-09-04):** **0.91401**, the best on the board so far, and the third
+  scored run — so `src.log_lb` now prints a rank correlation:
+  spearman(cv, public_lb) = 1.000 over 3 runs. Do not read much into that. With
+  three points, perfect rank agreement happens 1 time in 6 under a pure null.
+  The real argument for trusting CV is in the section below, and it is stronger.
+- **Keep / drop:** keep. Best CV *and* best LB in the repo, and the honest
+  estimate is the same as the fitted one.
 
 ### The lesson: 0.997 correlation did not mean 0.997 of the same answers
 
@@ -239,6 +244,52 @@ for a ranking metric.** The README's headline number was the wrong instrument;
 its *conclusion* — that two boosters on the same features are worth little — is
 still right in absolute terms, since +0.00018 AUC will not move the standings.
 A structurally different estimator is still the thing to reach for.
+
+### What the public LB can and cannot resolve — measured 2026-09-04
+
+Three scored runs, and the gap widens monotonically:
+
+| run | CV | LB | gap | CV delta | LB delta |
+|---|---|---|---|---|---|
+| `0902_232045_lgbm` | 0.916296 | 0.91389 | -0.00241 | — | — |
+| `0904_202729_lgbm` | 0.916391 | 0.91393 | -0.00246 | +0.000095 | +0.00004 |
+| `0904_210905_blend` | 0.916567 | 0.91401 | -0.00256 | +0.000176 | +0.00008 |
+
+Both improvements landed on the LB at roughly **45% of their CV size**, twice
+running. That looks like a pattern — CV gains only half-realised on test — and
+it would be worrying if it were real, so it was tested rather than eyeballed.
+
+The two submissions in each pair come from the **same fitted models**: the same
+booster that wrote `oof_*.npy` wrote `test_*.npy`. So comparing a pair's LB
+delta against its CV delta carries no refit or seed term, only evaluation noise
+on two disjoint row samples. The OOF paired-bootstrap SD is known for both
+comparisons (0.000044 and 0.000023), and evaluation noise scales as
+`1/sqrt(n)`, so the LB-side SD follows from the public set's size.
+
+The public fraction is not published, so all three plausible values were checked:
+
+| public = | SD(LB delta), blend vs ratios | z of the shortfall |
+|---|---|---|
+| 10% of test (25k rows) | 0.000111 | -0.85 |
+| 20% of test (51k rows) | 0.000079 | -1.17 |
+| 50% of test (127k rows) | 0.000050 | -1.75 |
+
+For the ratios-vs-baseline pair the z runs -0.25 to -0.53. **Nothing here is
+significant at any plausible public size.** The "45% carryover" is not an
+effect; it is two draws from a distribution wide enough to contain them.
+
+**The operational conclusion, which is the point of this section.** At a 20%
+public set the paired noise on an LB delta is ~0.00008, and the changes being
+made move the score by 0.00010-0.00018. The instrument is the same size as the
+thing being measured, so the LB cannot resolve a change of this magnitude —
+one submission is worth roughly one bit, and that bit is mostly noise. The
+absolute score is worse still: its SE is ~0.0019, twenty times any delta so far.
+
+So: **select on CV, and stop spending submissions to confirm changes this
+small.** That is what `log_lb` advises too, but its reason (a 3-point rank
+correlation) is much weaker than this one. Submissions are worth spending on
+changes large enough to see above ~0.0002, or on final selection. Revisit this
+if a run ever moves CV by enough for the LB to have an opinion.
 
 ## Dead ends
 
