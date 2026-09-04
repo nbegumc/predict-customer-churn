@@ -37,6 +37,31 @@ DEFAULT_PARAMS = {
 }
 
 
+def preprocessor(cats: list[str], nums: list[str]):
+    """One-hot the categoricals, standardise the numerics.
+
+    Shared with `models/mlp.py`, because "a numeric design matrix on a common
+    scale" is what every non-tree estimator here needs and what neither booster
+    wants. Every level is kept (no drop="first"): with L2 the shrinkage is then
+    symmetric across a column's levels, instead of measuring all of them against
+    whichever one happened to sort first. handle_unknown="ignore" is a belt —
+    the EDA found no test level missing from train.
+    """
+    from sklearn.compose import ColumnTransformer
+    from sklearn.preprocessing import OneHotEncoder, StandardScaler
+
+    return ColumnTransformer(
+        [
+            (
+                "cat",
+                OneHotEncoder(handle_unknown="ignore", sparse_output=False, dtype=np.float32),
+                cats,
+            ),
+            ("num", StandardScaler(), nums),
+        ]
+    )
+
+
 class LinearModel:
     name = "linear"
 
@@ -62,29 +87,14 @@ class LinearModel:
         fitted-on-what-you-score-on trap that section is at pains to avoid.
         Pass `--params '{"C": ...}'` to change it, one value per run.
         """
-        from sklearn.compose import ColumnTransformer
         from sklearn.linear_model import LogisticRegression
         from sklearn.pipeline import Pipeline
-        from sklearn.preprocessing import OneHotEncoder, StandardScaler
 
         self.features = list(features or X_tr.columns)
         self.cats = [c for c in self.features if str(X_tr[c].dtype) == "category"]
         self.nums = [c for c in self.features if c not in self.cats]
 
-        # Every level is kept (no drop="first"): with L2 the shrinkage is then
-        # symmetric across a column's levels instead of measuring all of them
-        # against whichever one happened to sort first. handle_unknown="ignore"
-        # is a belt — the EDA found no test level missing from train.
-        pre = ColumnTransformer(
-            [
-                (
-                    "cat",
-                    OneHotEncoder(handle_unknown="ignore", sparse_output=False, dtype=np.float32),
-                    self.cats,
-                ),
-                ("num", StandardScaler(), self.nums),
-            ]
-        )
+        pre = preprocessor(self.cats, self.nums)
         self.pipe = Pipeline([("pre", pre), ("clf", LogisticRegression(**self.params))])
         self.pipe.fit(X_tr[self.features], y_tr, clf__sample_weight=_norm_w(w_tr, len(y_tr)))
         return self

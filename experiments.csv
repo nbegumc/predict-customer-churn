@@ -6,3 +6,5 @@ run_id,timestamp,model,cv_score,public_lb,folds,notes
 0904_210905_blend,2026-09-04 21:09,blend,0.916567,0.91401,13feb807,"blend of 0904_202729_lgbm, 0904_210834_catboost"
 0905_015118_linear,2026-09-05 01:51,linear,0.907953,,13feb807,"logistic regression (L2, C=1.0) on one-hot categoricals + standardised numerics, same 21 features as 0904_202729_lgbm — README idea 3: a structurally different estimator as blend material, judge on ranking disagreement not solo score"
 0905_015321_blend,2026-09-05 01:53,blend,0.916567,,13feb807,"blend of 0904_202729_lgbm, 0904_210834_catboost, 0905_015118_linear"
+0905_020138_mlp,2026-09-05 02:01,mlp,0.912762,,13feb807,"MLPClassifier (128,64) relu/adam on the same one-hot + standardised design matrix as 0905_015118_linear, same 21 features — idea 3 again, but competitive: the linear model's dissent was unusable because it trailed lgbm by 0.0084"
+0905_020201_blend,2026-09-05 02:02,blend,0.916567,,13feb807,"blend of 0904_202729_lgbm, 0904_210834_catboost, 0905_020138_mlp"

@@ -22,12 +22,14 @@ from .features import build_features, fold_features
 from .models.catboost import CatBoostModel
 from .models.lgbm import LGBMModel
 from .models.linear import LinearModel
+from .models.mlp import MLPModel
 from .utils import log_experiment, new_run_id, save_oof, seed_everything, timer
 
 MODELS = {
     "lgbm": LGBMModel,
     "catboost": CatBoostModel,
     "linear": LinearModel,
+    "mlp": MLPModel,
 }
 
 

@@ -389,6 +389,88 @@ band where the models are close enough that the dissent stays balanced. CatBoost
 sits 0.0001 behind and qualifies; the linear model sits 0.0084 behind and cannot
 be rescued by any weight.
 
+### `0905_020138_mlp` — the same idea, made competitive
+
+- **Hypothesis:** the section above says a blend member must be different *and*
+  competitive, and names the linear model's 0.0084 solo deficit as the reason
+  its dissent was unusable. An MLP repairs exactly that half: it keeps the
+  structural contrast — distributed representations rather than axis-aligned
+  splits — while learning the interactions the additive model could not express,
+  which is where the deficit came from. If the correction is right, a smaller
+  gap should show up directly as more balanced dissent.
+- **Change:** new model `mlp` (`src/models/mlp.py`) — `MLPClassifier`, hidden
+  (128, 64), relu/adam, alpha 1e-4, batch 1024, on the *same* one-hot +
+  standardised design matrix as the linear model (`preprocessor()` is now shared
+  between them). Same 21 features, same folds, fingerprint `13feb807`.
+  scikit-learn rather than torch: it is already a dependency and this is a
+  594k x ~50 CPU problem.
+- **Result:** CV **0.912762** (folds 0.912244 / 0.913611 / 0.912947 / 0.914082 /
+  0.911562), **-0.003629 behind LightGBM**, still losing 5/5. 17-29s per fold,
+  25-43 epochs.
+- **Read:** the repair worked on its own terms — the gap more than halved,
+  0.008438 -> 0.003629 — and the dissent duly became more balanced, 61.5% ->
+  57.3%. Not balanced enough. Note the early-stopping caveat: sklearn stops on
+  `.score()`, i.e. *accuracy*, which at a 22.5% base rate barely moves when a
+  ranking change does not cross the 0.5 threshold. The patience was raised to 15
+  on that argument rather than tuned against a fold, so this is an honest but
+  not a squeezed number.
+- **Keep / drop:** keep the OOF, drop as a blend member. See below.
+
+### `0905_020201_blend` — lgbm + catboost + mlp
+
+- **Hypothesis:** at 57.3% balance instead of 61.5%, expect a small positive
+  gain — less than CatBoost's +0.000176, more than the linear model's zero.
+- **Change:** swapped the linear model for the MLP, vs `0905_015321_blend`.
+- **Result:** CV **0.916567**, weight on the MLP **0.0000**, and a weight scan
+  from 0 to 0.5 in steps of 0.0025 finds **no weight that gains anything at all**
+  (best +0.00000000). Identical to the two-model blend.
+- **Read:** the prediction was wrong in the direction that matters. "More
+  balanced" did not mean "worth something"; 57.3% is still predictably wrong
+  dissent, and the optimiser is not being coy — there is genuinely nothing
+  there. Two independent methods agree, Nelder-Mead over the full 3-simplex and
+  the one-dimensional scan against a fixed two-model base.
+- **Keep / drop:** drop. `0904_210905_blend` is still the submission.
+
+### The bar: how competitive a different model has to be — measured 2026-09-05
+
+Three candidates against the same reference (`0904_202729_lgbm`), 2,000,000
+sampled pairs, weight scanned 0 to 0.5 against the fixed two-model blend:
+
+| candidate | solo | gap | disagree | balance | identity says | best gain |
+|---|---|---|---|---|---|---|
+| catboost | 0.916274 | +0.000117 | 1.10% | 50.4% | 50.5% | *(already in)* |
+| mlp | 0.912762 | +0.003629 | 2.40% | 57.3% | 57.6% | +0.00000000 |
+| linear | 0.907953 | +0.008438 | 3.65% | 61.5% | 61.6% | +0.00000007 |
+
+`balance = 1/2 + gap/(2d)` predicts the measured column to within 0.3pp in every
+row, so the relationship is now checked on three models and not just derived.
+Note the ordering: **disagreement rises as the model gets worse, and value falls
+to zero.** Ranking disagreement read alone points at exactly the wrong candidate,
+which is what makes the uncorrected version of the rule actively dangerous.
+
+**Inverting it gives the bar.** For a candidate to dissent as evenly as CatBoost
+does (50.5%), its solo score must satisfy `gap <= 0.01 x d`:
+
+- the MLP, at d = 2.40%, would need solo **>= 0.916151** — it has 0.912762, short
+  by 0.0034.
+- the linear model, at d = 3.65%, would need **>= 0.916026** — short by 0.0081.
+
+That bar is within **0.00024** of LightGBM. So on this dataset a structurally
+different model has to be, to a first approximation, *as good as a tuned
+booster* before its difference is worth anything, and neither of the two
+non-tree shapes available is within 14x of that. Buying it with hyperparameter
+tuning is possible in principle and is the thing the README ranks last, for
+about this reason.
+
+**Verdict on README idea 3: it does not pay here, and the reason is measurable
+rather than a matter of taste.** The one blend that ever worked in this repo was
+two boosters 0.000117 apart — which the README predicted would be worth almost
+nothing, and which is in fact the *only* pair close enough to qualify. Idea 3
+still stands as written for problems where a different shape is competitive;
+this is a synthetic expansion of a small tabular table, where nothing that is
+not a tree comes close. What generalises is the test, not the verdict — and the
+test is two numbers that are already free on every run.
+
 ## Dead ends
 
 Anything tried that did not work, so it is not tried twice. One row each.
@@ -399,3 +481,4 @@ Anything tried that did not work, so it is not tried twice. One row each.
 | `n_addons` — the six optional services as a 0-6 count | +0.000010 on top of the two charges ratios, 95% interval [-0.000032, +0.000057] spanning zero, ahead in 274/400 resamples. Second from last on gain. The six columns are already in the model individually; summing them says nothing they do not. | 0904_202324 vs 0904_202729 |
 | `tenure_bucket` — `tenure` cut at 12/24 as a category | Same measurement as above; the two were dropped together. A bucketing of a numeric column the model already holds is the "rescaling of one column" case notebook 02 warned about — the categorical framing buys a subset split the tree cannot otherwise express, and that turned out to be worth nothing. | 0904_202324 vs 0904_202729 |
 | Logistic regression (L2, one-hot + standardised numerics) as a blend member | Structurally different as intended — it dissents on 3.65% of ranked pairs against CatBoost's 1.10% — but 0.008438 behind LightGBM solo, which forces the dissent to 62/38 against it. Added to the blend it is worth +0.00000005 and takes weight 0.0044; no weight in [0, 0.2] does better. Different is not enough, it also has to be competitive. | 0905_015118 vs 0905_015321 |
+| MLPClassifier (128, 64) on one-hot + standardised numerics as a blend member | Fixed the linear model's problem and still failed. Gap to LightGBM more than halved (0.008438 -> 0.003629) and dissent duly rebalanced (61.5% -> 57.3%), but the blend weight is 0.0000 and no weight in [0, 0.5] gains anything. The bar implied by `balance = 1/2 + gap/(2d)` is a solo score of 0.916151 at its 2.40% disagreement — within 0.00024 of LightGBM — and it is 0.0034 short. | 0905_020138 vs 0905_020201 |
