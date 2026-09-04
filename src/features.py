@@ -63,6 +63,26 @@ def as_categorical(
     return train, test
 
 
+# --- competition-specific: telco churn --------------------------------------
+def add_telco_features(df: pd.DataFrame) -> pd.DataFrame:
+    """Structure the raw columns do not already state.
+
+    Picked in notebooks/02_baseline.ipynb to be non-redundant with `contract`,
+    which already carries most of what `tenure` carried on its own. A rescaling
+    of an existing column adds nothing to a tree; a ratio between two of them
+    can.
+
+    Both ratios are safe to divide: tenure >= 1 and monthlycharges >= 18.25 in
+    train and test alike, and there are no missing cells in either frame.
+    """
+    df = df.copy()
+    # what the bill *should* have totalled if the current rate had always applied
+    implied = df.tenure * df.monthlycharges
+    df["charges_ratio"] = (df.totalcharges / implied).astype(np.float32)
+    df["avg_monthly_spend"] = (df.totalcharges / df.tenure).astype(np.float32)
+    return df
+
+
 def build_features(
     train: pd.DataFrame, test: pd.DataFrame
 ) -> tuple[pd.DataFrame, pd.DataFrame, list[str]]:
@@ -75,6 +95,8 @@ def build_features(
     if C.TIME_COL:
         train = add_date_parts(train, C.TIME_COL)
         test = add_date_parts(test, C.TIME_COL)
+
+    train, test = add_telco_features(train), add_telco_features(test)
 
     drop = {C.TARGET, C.ID_COL, C.TIME_COL} | (set(train.columns) - set(test.columns))
     features = [c for c in test.columns if c not in drop]

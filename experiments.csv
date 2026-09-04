@@ -1,2 +1,4 @@
 run_id,timestamp,model,cv_score,public_lb,folds,notes
 0902_232045_lgbm,2026-09-02 23:20,lgbm,0.916296,0.91389,13feb807,baseline
+0904_202324_lgbm,2026-09-04 20:23,lgbm,0.916402,,13feb807,"feat: charges_ratio, avg_monthly_spend, n_addons, tenure_bucket (vs baseline raw features)"
+0904_202729_lgbm,2026-09-04 20:27,lgbm,0.916391,,13feb807,"ablation: drop n_addons + tenure_bucket, keep only the two charges ratios"
