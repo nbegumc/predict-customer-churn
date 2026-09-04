@@ -173,6 +173,72 @@ silently spends a submission slot on a 0.5.
   worth about a thousandth of nothing. Do not expect to see it on the public LB
   — it is well inside LB sampling noise. It is banked because it is free and it
   is in the right direction, not because it moves the standings.
+- **LB, recorded after the fact (2026-09-04):** 0.91393, up +0.00004 on the
+  baseline's 0.91389 for a CV move of +0.000095. That is not confirmation —
+  +0.00004 is far inside LB sampling noise — it is only the absence of
+  contradiction. The number that carries information is the **gap**: -0.00241
+  then -0.00246, i.e. steady. A constant CV-LB offset is what "CV tracks LB"
+  looks like; it is the gap *moving* that would mean the folds are wrong.
+
+### `0904_210834_catboost` — a second booster, same 21 features
+
+- **Hypothesis:** blend material. The README is explicit that this is the *weak*
+  version of idea 3 — two boosting libraries on identical features are supposed
+  to correlate ~0.9 and blend to almost nothing, and what earns weight is a
+  different estimator *shape*. Run it anyway, because "almost nothing" is a
+  prediction and this repo measures predictions.
+- **Change:** model lgbm -> catboost (defaults: depth 8, lr 0.05, <=3000 rounds,
+  early stopping 200), vs. `0904_202729_lgbm`. Same features, same folds.
+- **Result:** CV 0.916274, i.e. **-0.000117 behind LightGBM solo**. Per fold it
+  loses on 0, 2, 4 and ties on 1, 3. ~5.5 min/fold against LightGBM's 18s.
+- **Read:** solo score is the wrong yardstick here and the notebook said so in
+  advance. Recorded, kept, judged below.
+- **Keep / drop:** keep as blend material. Not a candidate on its own.
+
+### `0904_210905_blend` — lgbm + catboost
+
+- **Hypothesis:** per the README, near-zero. The correlation came out at
+  **0.997** — *higher* than the ~0.9 the README predicted — which made near-zero
+  look like a safe bet.
+- **Change:** weighted average of `0904_202729_lgbm` and `0904_210834_catboost`,
+  weights optimised on OOF by `src.blend`.
+- **Result:** CV **0.916567**, +0.000176 over the best single model. Positive in
+  **5/5 folds**, paired bootstrap mean +0.000172, SD 0.000023, 95% interval
+  [+0.000130, +0.000216], ahead in **400/400** resamples. Nearly **twice** the
+  feature-engineering gain, from two models that correlate 0.997.
+- **Read — the blend weight is fitted on the same OOF it is scored on**, so the
+  headline number had to be checked before it was believed. Three ways, all
+  agreeing: weight fitted on all OOF 0.916567; weight fitted on 4 folds and
+  applied to the 5th (nested, honest) 0.916565; flat 50/50 with nothing fitted
+  at all 0.916563. A spread of 0.000004 — the optimism is nil, because one
+  weight on a 2-simplex fitted to 594k rows has nowhere to overfit. The
+  per-fold weights are stable too (0.539-0.579). Rank-averaging scores
+  identically to probability-averaging (0.916563), as it must at r=0.997.
+- **Keep / drop:** keep. Best CV in the repo, and the honest estimate is the
+  same as the fitted one.
+
+### The lesson: 0.997 correlation did not mean 0.997 of the same answers
+
+Worth stating separately, because it contradicts the diagnostic the README
+recommends and it will come up again on every future blend.
+
+The 0.997 is a Pearson correlation of two prediction *vectors*, and it is
+dominated by the easy rows. 54% of the data sits at a mean prediction below 0.1
+where both models say "will not churn" and agree trivially. Split by confidence
+band, the correlation inside each band is only 0.89-0.96.
+
+The metric is AUC, which is a *ranking* statistic: it is the fraction of
+churner/non-churner pairs put in the right order. So the diagnostic that matches
+the metric is pairwise ranking disagreement. Measured on 200,000 random pairs:
+LightGBM ranks 0.9162 correctly, CatBoost 0.9161 — and **they disagree on 1.09%
+of the pairs**. That ~1% is the raw material the blend trades on, and it is
+completely invisible in the 0.997.
+
+**Use ranking disagreement, not prediction correlation, to judge blend material
+for a ranking metric.** The README's headline number was the wrong instrument;
+its *conclusion* — that two boosters on the same features are worth little — is
+still right in absolute terms, since +0.00018 AUC will not move the standings.
+A structurally different estimator is still the thing to reach for.
 
 ## Dead ends
 

@@ -1,4 +1,6 @@
 run_id,timestamp,model,cv_score,public_lb,folds,notes
 0902_232045_lgbm,2026-09-02 23:20,lgbm,0.916296,0.91389,13feb807,baseline
 0904_202324_lgbm,2026-09-04 20:23,lgbm,0.916402,,13feb807,"feat: charges_ratio, avg_monthly_spend, n_addons, tenure_bucket (vs baseline raw features)"
-0904_202729_lgbm,2026-09-04 20:27,lgbm,0.916391,,13feb807,"ablation: drop n_addons + tenure_bucket, keep only the two charges ratios"
+0904_202729_lgbm,2026-09-04 20:27,lgbm,0.916391,0.91393,13feb807,"ablation: drop n_addons + tenure_bucket, keep only the two charges ratios"
+0904_210834_catboost,2026-09-04 21:08,catboost,0.916274,,13feb807,"catboost on the same 21 features as 0904_202729_lgbm — blend material, judge on correlation not solo score"
+0904_210905_blend,2026-09-04 21:09,blend,0.916567,,13feb807,"blend of 0904_202729_lgbm, 0904_210834_catboost"
