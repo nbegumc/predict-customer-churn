@@ -4,3 +4,5 @@ run_id,timestamp,model,cv_score,public_lb,folds,notes
 0904_202729_lgbm,2026-09-04 20:27,lgbm,0.916391,0.91393,13feb807,"ablation: drop n_addons + tenure_bucket, keep only the two charges ratios"
 0904_210834_catboost,2026-09-04 21:08,catboost,0.916274,,13feb807,"catboost on the same 21 features as 0904_202729_lgbm — blend material, judge on correlation not solo score"
 0904_210905_blend,2026-09-04 21:09,blend,0.916567,0.91401,13feb807,"blend of 0904_202729_lgbm, 0904_210834_catboost"
+0905_015118_linear,2026-09-05 01:51,linear,0.907953,,13feb807,"logistic regression (L2, C=1.0) on one-hot categoricals + standardised numerics, same 21 features as 0904_202729_lgbm — README idea 3: a structurally different estimator as blend material, judge on ranking disagreement not solo score"
+0905_015321_blend,2026-09-05 01:53,blend,0.916567,,13feb807,"blend of 0904_202729_lgbm, 0904_210834_catboost, 0905_015118_linear"

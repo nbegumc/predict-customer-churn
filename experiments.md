@@ -291,6 +291,104 @@ correlation) is much weaker than this one. Submissions are worth spending on
 changes large enough to see above ~0.0002, or on final selection. Revisit this
 if a run ever moves CV by enough for the LB to have an opinion.
 
+### `0905_015118_linear` — logistic regression, the first structurally different model
+
+- **Hypothesis:** README idea 3. Two boosters on the same features disagreed on
+  only 1.09% of ranked pairs, and the note above concluded that a *structurally
+  different* estimator is the thing to reach for. A linear model in the one-hot
+  basis is the cheapest thing that qualifies and the sharpest contrast
+  available: a booster is an interaction machine, a linear model is purely
+  additive and cannot express a single interaction. It should therefore dissent
+  on far more than 1.09% of pairs, and that dissent should be worth something.
+  The first half of that was right and the second half was wrong.
+- **Change:** new model `linear` (`src/models/linear.py`) — L2 logistic
+  regression, C=1.0, on one-hot categoricals plus standardised numerics, fitted
+  inside the fold. Same 21 features and same folds as `0904_202729_lgbm`;
+  fingerprint still `13feb807`. Preprocessing lives in the model rather than in
+  `features.py` because it is model-specific — LightGBM wants native
+  categoricals and a one-hot expansion would hurt it, the same reason CatBoost
+  owns its NA level.
+- **Result:** CV **0.907953** (folds 0.907465 / 0.908911 / 0.908136 / 0.909146 /
+  0.906143), i.e. **-0.008438 behind LightGBM**, losing on 5/5 folds. ~2s per
+  fold against CatBoost's 5.5 minutes.
+- **Read:** the solo gap is the whole story of this run, and it is 100x every
+  feature-engineering move made so far. As blend material judged the way the
+  note above says to judge it, this looked excellent — see the next two entries
+  for why it was not.
+- **Keep / drop:** keep the code and the OOF. Not a candidate on its own, and —
+  unlike CatBoost — not a candidate as a blend member either.
+
+### `0905_015321_blend` — lgbm + catboost + linear
+
+- **Hypothesis:** the linear model dissents ~3x as often as CatBoost does, so on
+  the diagnostic this file recommends it is 3x the raw material. Expect a gain
+  larger than the +0.000176 the two boosters produced.
+- **Change:** added `0905_015118_linear` to the blend, vs `0904_210905_blend`.
+- **Result:** CV **0.91656693** against the two-model blend's **0.91656687** —
+  **+0.00000005**, positive in 2/5 folds. The optimiser gave the linear model a
+  weight of **0.0044** and there is no weight at which it does better: a scan
+  from w=0 to 0.2 peaks at w=0.005 for +0.0000000 and then falls monotonically
+  (w=0.05 -> 0.916550, w=0.10 -> 0.916495, w=0.20 -> 0.916273).
+- **Read:** this is not a small gain, it is no gain. +0.00000005 is a
+  *thousandth* of the +/-0.000052 seed spread. The ranking disagreement was
+  measured correctly and was real — 3.65% of pairs against CatBoost's 1.10%,
+  and that 1.10% reproduces the 1.09% recorded above, which is the check that
+  the new implementation in `blend.py` measures what the old ad-hoc one did.
+  Three times the disagreement bought exactly nothing.
+- **Keep / drop:** drop the linear model from the blend; `0904_210905_blend`
+  remains the submission. Kept in `experiments/` as blend material only in the
+  sense that everything is kept.
+
+### The correction: disagreement has to be *balanced*, not just large
+
+The lesson two sections up says to judge blend material by ranking disagreement
+rather than prediction correlation. That is still right as far as it goes, and
+followed on its own it would have predicted the linear model was three times the
+blend material CatBoost was. It is worth nothing. The rule was half a rule.
+
+Splitting each disagreement by *who was right* is what finishes it. On 2,000,000
+sampled (churner, non-churner) pairs:
+
+| pair | disagree on | A right | B right | blend gain |
+|---|---|---|---|---|
+| lgbm vs catboost | 1.10% | 50.4% | 49.6% | +0.000176 |
+| lgbm vs linear | 3.65% | **61.5%** | **38.5%** | +0.00000005 |
+| catboost vs linear | 3.59% | 61.6% | 38.4% | — |
+
+CatBoost's dissent is a coin flip, so averaging recovers information from it.
+The linear model's dissent is 62/38 against itself — when it breaks from the
+boosters it is usually simply wrong, and a weighted average of a good ranker and
+a worse one that disagrees *predictably* has nothing to recover.
+
+**And this is not a coincidence, it is an identity.** AUC is the probability of
+ordering a (positive, negative) pair correctly, so for any two models
+
+    AUC_A - AUC_B = P(A right, B wrong) - P(B right, A wrong)
+
+Both terms on the right sum to the disagreement `d`, so the balance is forced:
+
+    P(A right | they disagree) = 1/2 + (AUC_A - AUC_B) / (2d)
+
+Check it: CatBoost, gap 0.000117 and d 0.0110 -> 50.5% (measured 50.4%). Linear,
+gap 0.008438 and d 0.0365 -> 61.6% (measured 61.5%). A model's solo deficit is
+*exactly* its net loss on the pairs where it dissents; there is nowhere else for
+a deficit to live.
+
+**The operational form.** The quantity to look at before blending is the ratio
+`gap / (2 x disagreement)` — how far from a coin flip the dissent is. It is
+free: the gap is the difference of two CV scores already in `experiments.csv`,
+and `src/blend.py` now prints the disagreement matrix on every run. CatBoost
+scores 1.1% away from balanced, the linear model 12%. Large disagreement is
+necessary and not sufficient; it has to be large *and* near 50/50, which means
+**a blend member must be both different and competitive.** Being different is
+the cheap half.
+
+So solo score is not the wrong yardstick for a blend member after all, which is
+what the CatBoost entry above assumed. It is the wrong yardstick only within the
+band where the models are close enough that the dissent stays balanced. CatBoost
+sits 0.0001 behind and qualifies; the linear model sits 0.0084 behind and cannot
+be rescued by any weight.
+
 ## Dead ends
 
 Anything tried that did not work, so it is not tried twice. One row each.
@@ -300,3 +398,4 @@ Anything tried that did not work, so it is not tried twice. One row each.
 | Assigning the submission column by `C.TARGET` | `sample_submission.csv` is read raw and keeps `Churn`; `C.TARGET` is lower-cased `churn`, so the assignment appends a column and leaves the real one all-zeros. Uploads cleanly, scores 0.5. | pre-baseline |
 | `n_addons` — the six optional services as a 0-6 count | +0.000010 on top of the two charges ratios, 95% interval [-0.000032, +0.000057] spanning zero, ahead in 274/400 resamples. Second from last on gain. The six columns are already in the model individually; summing them says nothing they do not. | 0904_202324 vs 0904_202729 |
 | `tenure_bucket` — `tenure` cut at 12/24 as a category | Same measurement as above; the two were dropped together. A bucketing of a numeric column the model already holds is the "rescaling of one column" case notebook 02 warned about — the categorical framing buys a subset split the tree cannot otherwise express, and that turned out to be worth nothing. | 0904_202324 vs 0904_202729 |
+| Logistic regression (L2, one-hot + standardised numerics) as a blend member | Structurally different as intended — it dissents on 3.65% of ranked pairs against CatBoost's 1.10% — but 0.008438 behind LightGBM solo, which forces the dissent to 62/38 against it. Added to the blend it is worth +0.00000005 and takes weight 0.0044; no weight in [0, 0.2] does better. Different is not enough, it also has to be competitive. | 0905_015118 vs 0905_015321 |

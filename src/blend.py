@@ -37,6 +37,26 @@ def _fit_weights(y, oofs):
     return np.abs(res.x) / np.abs(res.x).sum()
 
 
+def _rank_disagreement(y, oofs, run_ids, n_pairs: int = 200_000) -> pd.DataFrame:
+    """% of (positive, negative) pairs that two runs order differently.
+
+    AUC is the fraction of positive/negative pairs put in the right order, so
+    the diagnostic that matches it is how often two runs order such a pair
+    differently. Prediction correlation does not match it: it is dominated by
+    the easy rows where both models agree trivially. On this data LightGBM and
+    CatBoost correlated 0.997 and still disagreed on 1.09% of pairs — and that
+    ~1% is the entire raw material the blend traded on. See experiments.md,
+    "0.997 correlation did not mean 0.997 of the same answers".
+    """
+    rng = np.random.default_rng(C.SEED)
+    i = rng.choice(np.flatnonzero(y == 1), n_pairs)
+    j = rng.choice(np.flatnonzero(y == 0), n_pairs)
+    correct = oofs[i] > oofs[j]  # (n_pairs, n_runs)
+    n = len(run_ids)
+    m = [[100 * (correct[:, a] != correct[:, b]).mean() for b in range(n)] for a in range(n)]
+    return pd.DataFrame(m, index=run_ids, columns=run_ids)
+
+
 def _assert_same_folds(run_ids: list[str], train) -> str:
     """Refuse to blend predictions produced under different fold schemes.
 
@@ -81,8 +101,16 @@ def blend(run_ids: list[str]):
 
     for r, col in zip(run_ids, oofs.T):
         print(f"{r}: {CV.score(y, col):.6f}")
-    print("\ncorrelation of OOF predictions (low = good blend material):")
+    print("\ncorrelation of OOF predictions:")
     print(pd.DataFrame(oofs, columns=run_ids).corr().round(3).to_string())
+    # For a ranking metric the correlation is the wrong instrument — it reads
+    # near-1 for models that still order ~1% of pairs differently, which is
+    # exactly what a blend lives on. Print the matching diagnostic too.
+    if C.METRIC.lower() == "auc":
+        print(
+            "\nranking disagreement, % of pairs ordered differently (high = good blend material):"
+        )
+        print(_rank_disagreement(y, oofs, run_ids).round(2).to_string())
 
     w = _fit_weights(y, oofs)
     blended = CV.score(y, oofs @ w)
