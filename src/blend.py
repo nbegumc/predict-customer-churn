@@ -37,24 +37,87 @@ def _fit_weights(y, oofs):
     return np.abs(res.x) / np.abs(res.x).sum()
 
 
-def _rank_disagreement(y, oofs, run_ids, n_pairs: int = 200_000) -> pd.DataFrame:
+N_PAIRS = 2_000_000
+
+
+def _correct_by_pair(y, oofs, n_pairs: int = N_PAIRS) -> np.ndarray:
+    """(n_pairs, n_runs) bool: did each run order this (positive, negative) pair right?
+
+    One sample shared by both diagnostics below, so the disagreement matrix and
+    the dissent table can never quote slightly different numbers for the same
+    comparison.
+    """
+    rng = np.random.default_rng(C.SEED)
+    i = rng.choice(np.flatnonzero(y == 1), n_pairs)
+    j = rng.choice(np.flatnonzero(y == 0), n_pairs)
+    return oofs[i] > oofs[j]
+
+
+def _rank_disagreement(correct, run_ids) -> pd.DataFrame:
     """% of (positive, negative) pairs that two runs order differently.
 
     AUC is the fraction of positive/negative pairs put in the right order, so
     the diagnostic that matches it is how often two runs order such a pair
     differently. Prediction correlation does not match it: it is dominated by
     the easy rows where both models agree trivially. On this data LightGBM and
-    CatBoost correlated 0.997 and still disagreed on 1.09% of pairs — and that
+    CatBoost correlated 0.997 and still disagreed on 1.10% of pairs — and that
     ~1% is the entire raw material the blend traded on. See experiments.md,
     "0.997 correlation did not mean 0.997 of the same answers".
+
+    Necessary, and on its own badly misleading — see `_dissent_table`.
     """
-    rng = np.random.default_rng(C.SEED)
-    i = rng.choice(np.flatnonzero(y == 1), n_pairs)
-    j = rng.choice(np.flatnonzero(y == 0), n_pairs)
-    correct = oofs[i] > oofs[j]  # (n_pairs, n_runs)
     n = len(run_ids)
     m = [[100 * (correct[:, a] != correct[:, b]).mean() for b in range(n)] for a in range(n)]
     return pd.DataFrame(m, index=run_ids, columns=run_ids)
+
+
+def _dissent_table(y, oofs, correct, run_ids) -> tuple[str, pd.DataFrame]:
+    """Disagreement with the best run, split by *who is right* when they differ.
+
+    Disagreement volume read alone is a trap: it **rises as a candidate gets
+    worse**, so it recommends the weakest model in the list. Measured here:
+    CatBoost dissented from LightGBM on 1.10% of pairs and was worth +0.000176,
+    while a logistic regression dissented on 3.65% — three times the raw
+    material — and was worth +0.00000007.
+
+    What decides whether a blend can use the dissent is how evenly it splits,
+    and that split is forced by an identity rather than being an empirical
+    tendency. AUC is the probability of ordering a pair correctly, so
+
+        AUC_a - AUC_b = P(a right, b wrong) - P(b right, a wrong)
+
+    and both terms sum to the disagreement d, giving
+
+        P(best right | they disagree) = 1/2 + (AUC_best - AUC_other) / 2d
+
+    A model's solo deficit **is** its net loss on the pairs where it dissents;
+    there is nowhere else for a deficit to live. So near 50% means the dissent
+    is a coin flip and averaging can recover something from it; well above 50%
+    means the candidate is predictably wrong where it differs, and no weight
+    will help. A blend member has to be different *and* competitive, and being
+    different is the cheap half.
+    """
+    scores = [CV.score(y, c) for c in oofs.T]
+    best = int(np.argmax(scores))
+    rows = []
+    for k, r in enumerate(run_ids):
+        if k == best:
+            continue
+        best_only = (correct[:, best] & ~correct[:, k]).mean()
+        cand_only = (~correct[:, best] & correct[:, k]).mean()
+        d = best_only + cand_only
+        gap = scores[best] - scores[k]
+        rows.append(
+            {
+                "run": r,
+                "solo": scores[k],
+                "gap": gap,
+                "disagree %": 100 * d,
+                "best right %": 100 * best_only / d if d else float("nan"),
+                "identity %": 100 * (0.5 + gap / (2 * d)) if d else float("nan"),
+            }
+        )
+    return run_ids[best], pd.DataFrame(rows)
 
 
 def _assert_same_folds(run_ids: list[str], train) -> str:
@@ -107,10 +170,31 @@ def blend(run_ids: list[str]):
     # near-1 for models that still order ~1% of pairs differently, which is
     # exactly what a blend lives on. Print the matching diagnostic too.
     if C.METRIC.lower() == "auc":
-        print(
-            "\nranking disagreement, % of pairs ordered differently (high = good blend material):"
-        )
-        print(_rank_disagreement(y, oofs, run_ids).round(2).to_string())
+        correct = _correct_by_pair(y, oofs)
+        print(f"\nranking disagreement, % of {N_PAIRS:,} sampled pairs ordered differently:")
+        print(_rank_disagreement(correct, run_ids).round(2).to_string())
+
+        # Volume alone recommends the worst candidate in the list, so never
+        # print it without the split that says who is right when they differ.
+        best, tbl = _dissent_table(y, oofs, correct, run_ids)
+        if not tbl.empty:
+            print(f"\nblend candidacy, against the best run ({best}):")
+            print(
+                tbl.to_string(
+                    index=False,
+                    formatters={
+                        "solo": lambda v: f"{v:.6f}",
+                        "gap": lambda v: f"{v:+.6f}",
+                        "disagree %": lambda v: f"{v:.2f}",
+                        "best right %": lambda v: f"{v:.1f}",
+                        "identity %": lambda v: f"{v:.1f}",
+                    },
+                )
+            )
+            print(
+                "  50% = the dissent is a coin flip, so a blend can use it.\n"
+                "  Well above 50% = the candidate is predictably wrong where it differs."
+            )
 
     w = _fit_weights(y, oofs)
     blended = CV.score(y, oofs @ w)

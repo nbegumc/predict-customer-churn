@@ -377,8 +377,10 @@ a deficit to live.
 **The operational form.** The quantity to look at before blending is the ratio
 `gap / (2 x disagreement)` — how far from a coin flip the dissent is. It is
 free: the gap is the difference of two CV scores already in `experiments.csv`,
-and `src/blend.py` now prints the disagreement matrix on every run. CatBoost
-scores 1.1% away from balanced, the linear model 12%. Large disagreement is
+and `src/blend.py` now prints both halves on every run — the disagreement
+matrix, and a `blend candidacy` table splitting each candidate's dissent
+against the best run by who is right. CatBoost scores 1.1% away from balanced,
+the linear model 12%. Large disagreement is
 necessary and not sufficient; it has to be large *and* near 50/50, which means
 **a blend member must be both different and competitive.** Being different is
 the cheap half.
@@ -461,6 +463,13 @@ booster* before its difference is worth anything, and neither of the two
 non-tree shapes available is within 14x of that. Buying it with hyperparameter
 tuning is possible in principle and is the thing the README ranks last, for
 about this reason.
+
+**Now enforced in the tool.** `src/blend.py` printed only the disagreement
+matrix when this section was first written, which is the half that recommends
+the worst candidate. It now prints the split as well, off a single shared pair
+sample so the two can never quote different numbers for the same comparison,
+and the `identity %` column shows `1/2 + gap/2d` beside the measurement so a
+future run gets the check for free.
 
 **Verdict on README idea 3: it does not pay here, and the reason is measurable
 rather than a matter of taste.** The one blend that ever worked in this repo was
