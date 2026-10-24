@@ -1,0 +1,52 @@
+# Local stack: the scoring API and the tracking server it logs to.
+#
+#   cp .env.example .env     # set MODEL_RUN_ID to a bundle in models/
+#   docker compose up -d
+#   open http://localhost:8000   (API)  /  http://localhost:5000  (MLflow)
+#
+# Local only, by choice. There is no deploy target here; docs/deployment.md
+# records what running this somewhere else would involve.
+
+services:
+  api:
+    build:
+      context: .
+      args:
+        # Baked into the image, so an image is never ambiguous about its model.
+        MODEL_RUN_ID: ${MODEL_RUN_ID:?set MODEL_RUN_ID in .env — see .env.example}
+    image: churn-api:${MODEL_RUN_ID:-local}
+    ports:
+      - "8000:8000"
+    environment:
+      # fold_average is the default; full_refit is the other strategy in the
+      # same bundle. Switching is a restart, not a rebuild.
+      MODEL_STRATEGY: ${MODEL_STRATEGY:-fold_average}
+      MLFLOW_TRACKING_URI: http://mlflow:5000
+    volumes:
+      # The prediction log src.monitor reads. The only writable path the
+      # container needs; everything else is immutable in the image.
+      - ./logs:/app/logs
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')"]
+      interval: 30s
+      timeout: 3s
+      start_period: 20s
+      retries: 3
+    restart: unless-stopped
+
+  mlflow:
+    image: ghcr.io/mlflow/mlflow:v3.17.2
+    command: >
+      mlflow server
+      --host 0.0.0.0
+      --port 5000
+      --backend-store-uri sqlite:////mlflow/mlflow.db
+      --default-artifact-root /mlflow/artifacts
+    ports:
+      - "5000:5000"
+    volumes:
+      # Bind-mounted so a training run on the host and the UI in the container
+      # see the same store. SQLite has one writer here (the training run), so
+      # the usual bind-mount locking caveat does not bite.
+      - ./mlruns:/mlflow
+    restart: unless-stopped
