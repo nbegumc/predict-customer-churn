@@ -64,6 +64,34 @@ In rough order of value per hour spent:
    estimator shape is what earns weight.
 4. Hyperparameter tuning. Last, and worth less than you think.
 
+## From competition repo to served model
+
+The competition half of this repo optimises for a leaderboard: prediction
+arrays, a frozen CV scheme, one logged row per experiment. Production needs
+nearly the opposite — a persisted, versioned model and a deterministic
+single-record inference path. Both now exist side by side.
+
+```bash
+make serve     # the API on :8000
+make up        # api + mlflow + prometheus
+make drift     # live traffic vs the training distribution
+```
+
+- **[docs/architecture.md](docs/architecture.md)** — how a raw row becomes a
+  prediction, and what is guaranteed at each hop.
+- **[docs/serving.md](docs/serving.md)** — the API contract and the two tiers of
+  validation.
+- **[docs/deployment.md](docs/deployment.md)** — what deploying would involve.
+  Nothing here is built; local compose is the choice.
+- **[docs/adr/](docs/adr/README.md)** — twelve decisions, each with its Azure
+  equivalent and what it would cost to change.
+
+The single most important thing to understand before touching feature code is
+[ADR 0012](docs/adr/0012-train-serve-parity.md): the training and serving paths
+compute features through the same functions in the same order, and a test
+asserts they agree **bitwise** on all 254,655 real test rows. Three specific
+bugs live in the gap between those two paths, and all three are measured there.
+
 ## Working on Kaggle notebooks (when you need their GPU)
 
 `src/` is pushed up as a Kaggle utility dataset and imported in the kernel:

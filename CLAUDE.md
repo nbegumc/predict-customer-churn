@@ -25,6 +25,16 @@ don't re-suggest something already listed there.
 - **Files in `experiments/`.** Every `oof_*.npy` and `test_*.npy` is blend
   material until the last day. Never clean them up.
 - **`data/raw/`.** Immutable and gitignored. Never commit data, never force-add.
+- **The serving path's feature order.** `src/predict.py` must call
+  `reduce_memory` *before* `add_telco_features`, because training does — the
+  ratios are computed from float32 operands and the trees' split thresholds were
+  learned on those values. `tests/test_predict.py` asserts bitwise parity.
+- **`data.basic_clean` must never appear in a serving path.** It ends in
+  `drop_duplicates()`, so identical rows in a batch collapse and the response
+  misaligns with the request. Serving wants `data.normalise_columns`.
+- **`features.build_features` must never appear in a serving path either.** It
+  calls `as_categorical`, which rebuilds category lists from the frame it is
+  given; the real lists are pinned in the bundle manifest.
 
 ## Conventions
 
@@ -44,6 +54,16 @@ don't re-suggest something already listed there.
 - Pre-commit hooks run on commit. If one rewrites a file, re-stage and retry
   rather than reaching for `--no-verify`; that flag is the user's call, not
   yours.
+
+## Serving and ops
+
+- Decisions live in `docs/adr/`, one file each, with the Azure equivalent. Add
+  one when you make a choice someone would otherwise re-litigate; don't delete a
+  superseded one, mark it.
+- A training run writes into `experiments/`, which DVC tracks — `dvc status`
+  goes dirty until `make dvc-save`.
+- Model bundles ship as GitHub Release assets, never in git: a bundle is ~30MB
+  against the 1MB `check-added-large-files` hook.
 
 ## After a run
 
