@@ -97,6 +97,15 @@ MODEL_DIR = WORK / "models"
 MLFLOW_TRACKING_URI = os.getenv("MLFLOW_TRACKING_URI", f"sqlite:///{WORK / 'mlflow.db'}")
 MLFLOW_EXPERIMENT = os.getenv("MLFLOW_EXPERIMENT", COMPETITION)
 
+# Risk bands for the API, as probability thresholds. These are a *business*
+# decision, not a model property: they come from the lift curve in
+# notebooks/99_final_writeup.ipynb, where the top 10% of the ranked call list
+# runs at 3.7x the base rate and the top 30% reaches 82% of churners at 2.7x.
+# Measured on the champion's OOF distribution: p90 = 0.711, p70 = 0.311.
+# A bundle carrying its own score_quantiles overrides these.
+RISK_BAND_HIGH = 0.711
+RISK_BAND_MEDIUM = 0.311
+
 # One JSON line per served prediction. The input src.monitor reads to build a
 # drift report; append-only, and never on the request's critical path.
 PRED_LOG = WORK / "logs" / "predictions.jsonl"

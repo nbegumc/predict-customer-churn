@@ -78,6 +78,26 @@ class Bundle:
             "n_members": len(self.members),
         }
 
+    def risk_band(self, probability: float) -> str:
+        """Where this customer sits in the ranked call list: high | medium | low.
+
+        A band is a *business* threshold on the ranked population, not a property
+        of the model, so it needs the score distribution rather than the score.
+        `notebooks/99_final_writeup.ipynb` frames the output as a retention call
+        list worked from the top down, and the top 10% runs at 3.7x the base
+        rate while the top 30% reaches 82% of churners.
+
+        Prefers the quantiles pinned into the bundle at training time; falls
+        back to the thresholds in config.py for bundles written before the
+        manifest carried them.
+        """
+        q = self.manifest.get("score_quantiles") or {}
+        high = float(q.get("0.9", C.RISK_BAND_HIGH))
+        medium = float(q.get("0.7", C.RISK_BAND_MEDIUM))
+        if probability >= high:
+            return "high"
+        return "medium" if probability >= medium else "low"
+
 
 def bundle_path(run_id_or_path: str | Path) -> Path:
     """Accept either a run_id under MODEL_DIR or a path to a bundle directory."""

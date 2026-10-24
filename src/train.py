@@ -43,7 +43,17 @@ MODELS = {
 
 
 def _write_manifest(
-    bundle, run_id, model, train, features, cv_score, fold_scores, best_iters, resolved, has_refit
+    bundle,
+    run_id,
+    model,
+    train,
+    features,
+    cv_score,
+    fold_scores,
+    best_iters,
+    resolved,
+    has_refit,
+    oof=None,
 ) -> None:
     """Everything needed to score one unseen row the way a CV row was scored.
 
@@ -81,6 +91,17 @@ def _write_manifest(
         "seed": C.SEED,
         "fold_fingerprint": CV.fold_fingerprint(train),
         "cv_score": round(float(cv_score), 6),
+        # Where a probability sits in the scored population. Risk bands are a
+        # business threshold on the *ranked list*, so they need the
+        # distribution, not just the score. Falls back to config when absent.
+        "score_quantiles": (
+            {
+                str(q): round(float(np.nanquantile(oof, q)), 6)
+                for q in (0.5, 0.7, 0.8, 0.9, 0.95, 0.99)
+            }
+            if oof is not None
+            else {}
+        ),
         "fold_scores": [round(float(s), 6) for s in fold_scores],
         "best_iterations": best_iters,
         "features": list(features),
@@ -235,6 +256,7 @@ def run(
                 best_iters,
                 resolved,
                 full_refit and bool(best_iters),
+                oof,
             )
             # The whole bundle, so an MLflow run is self-sufficient: the
             # boosters plus the manifest that says how to feed them.
