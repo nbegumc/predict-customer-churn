@@ -19,7 +19,7 @@ import pandas as pd
 from . import config as C
 from . import cv as CV
 from .data import load, load_sample_submission
-from .features import build_features, fold_features
+from .features import DERIVED, build_features, fold_features
 from .models.catboost import CatBoostModel
 from .models.lgbm import LGBMModel
 from .models.linear import LinearModel
@@ -84,6 +84,10 @@ def _write_manifest(
         "fold_scores": [round(float(s), 6) for s in fold_scores],
         "best_iterations": best_iters,
         "features": list(features),
+        # What a caller must supply: the features minus the ones
+        # add_telco_features derives. Pinned here rather than recomputed at
+        # serving time, so an old bundle stays readable if DERIVED ever changes.
+        "raw_columns": [c for c in features if c not in DERIVED],
         "categories": cats,
         "dtypes": {c: str(train[c].dtype) for c in features},
         "params": resolved,

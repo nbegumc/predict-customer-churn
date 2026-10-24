@@ -21,14 +21,28 @@ def load_sample_submission() -> pd.DataFrame:
     return pd.read_csv(C.SAMPLE_SUB_FILE)
 
 
+def normalise_columns(df: pd.DataFrame) -> pd.DataFrame:
+    """Lower-case, strip and underscore the headers, in place.
+
+    Split out of `basic_clean` because it is the *only* part of cleaning a
+    serving path also needs — see the warning on `basic_clean` below.
+    """
+    df.columns = [c.strip().lower().replace(" ", "_") for c in df.columns]
+    return df
+
+
 def basic_clean(df: pd.DataFrame) -> pd.DataFrame:
     """Cleaning that applies identically to train and test.
 
     Anything fitted on data (imputation values, encoders, scalers) belongs in
     features.py inside the fold loop — otherwise you leak.
+
+    NOT FOR SERVING. `drop_duplicates` below is correct for a training frame
+    and wrong for a request: three identical customers in a batch collapse to
+    one row, and the response silently comes back shorter than, and misaligned
+    with, the request. `src/predict.py` calls `normalise_columns` instead.
     """
-    df = df.copy()
-    df.columns = [c.strip().lower().replace(" ", "_") for c in df.columns]
+    df = normalise_columns(df.copy())
     df = df.drop_duplicates()
     return df
 

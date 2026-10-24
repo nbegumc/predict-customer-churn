@@ -64,6 +64,12 @@ def as_categorical(
 
 
 # --- competition-specific: telco churn --------------------------------------
+# Columns `add_telco_features` derives rather than reads. A serving caller
+# supplies everything else; these it must not supply, because they have to be
+# computed here from the float32-downcast operands to match training.
+DERIVED = ("charges_ratio", "avg_monthly_spend")
+
+
 def add_telco_features(df: pd.DataFrame) -> pd.DataFrame:
     """Structure the raw columns do not already state.
 

@@ -518,6 +518,83 @@ test is two numbers that are already free on every run.
   time (~2 min here). Ids before this run mean run-end; ids after mean
   run-start.
 
+### `1024_143040_lgbm` — what committing to a fixed round count costs
+
+- **Hypothesis:** serving the model as a single fit on 100% of train requires
+  giving up early stopping, because a 100%-of-train fit has no held-out rows to
+  watch. That is a real cost and it is separable from everything else about the
+  strategy, so it can be priced on the frozen folds.
+- **Change:** `--rounds 1044 --no-early-stopping` vs `0904_202729_lgbm`. Same
+  features, same params, same folds. 1044 = `round(835 x 5/4)`, the fold mean of
+  712/937/833/822/873 scaled because a refit sees 1/(k-1) more data than a fold
+  model does.
+- **Result:** CV **0.916357** against 0.916391, i.e. **-0.000034, negative in
+  5/5 folds** (-0.000041 / -0.000032 / -0.000034 / -0.000017 / -0.000048).
+- **Read:** by this file's own standard the sign is the believable part — 5/5
+  same-sign is real, while -0.000034 sits below the +/-0.000052 seed spread. So
+  dropping early stopping costs a little, consistently, and buys nothing.
+- **Keep / drop:** drop as a candidate; it exists to price one half of the
+  serving-strategy decision below.
+
+### The serving strategy: fold average vs full refit — decided 2026-10-24
+
+Reproduced by `notebooks/03_serving_strategy.ipynb`; figure at
+`reports/figures/03_serving_strategy.png`. No submission was spent, for the
+reason in "What the public LB can and cannot resolve" above: paired LB noise is
+~0.00008 and these two differ by less than that.
+
+**The methodological problem first.** A model fit on 100% of train has no
+out-of-fold rows, so **there is no honest CV score for that artifact**. There is
+one for its *procedure*, which is the run above. Any comparison that quotes a
+single number for both strategies is quoting a number that does not exist for
+one of them.
+
+Three free measurements instead:
+
+| | `fold_average` | `full_refit` |
+|---|---|---|
+| OOF for the artifact | 0.916391 (conservative, see below) | **none exists** |
+| procedure cost on CV | — | -0.000034, 5/5 folds |
+| verifiable against the LB | **yes, bitwise** | no |
+| bundle size / members | 30MB / 5 | 6MB / 1 |
+
+Agreement on the 254,655 real test rows: spearman **0.99890**, mean |delta p|
+0.0064, max 0.156. 9.2% of customers change decile but only **0.001%** move more
+than one. Top-1% / top-10% / top-30% of the ranked call list overlap **95.0% /
+97.2% / 98.7%**. The disagreement is smallest exactly where the model is
+confident — 55% of rows sit below p=0.1 with mean |delta p| 0.0019.
+
+**Verdict: serve `fold_average`.** Not because it scores better — (b)'s artifact
+has no score to compare — but because it is **verifiable**. `test_*.npy` is the
+mean of the five fold models, and `tests/test_predict.py` asserts that scoring
+`data/raw/test.csv` through this strategy reproduces that array *bitwise*, so
+the thing being served is provably the thing that scored public LB 0.91393.
+Nothing equivalent can be said of a refit. Its procedure also costs a small,
+consistently-signed amount, and the operational difference is ~3% of the
+top-decile call list — not worth buying unfalsifiability with.
+
+**Keep the framing straight:** OOF 0.916391 is measured on *one fold model per
+row*, so it is a conservative estimate of the five-model average, not a
+description of it.
+
+`full_refit` stays in the bundle and is one env var away (`MODEL_STRATEGY`) if
+cold-start latency or image size ever makes 6MB and one member worth the loss of
+verifiability.
+
+### A floating-point note that cost an afternoon
+
+`train.py` builds its saved test predictions as `test_pred += p_k / len(folds)`.
+`src/predict.py` first reconstructed the same average as `sum(w * p_k)` with
+`w = 0.2` from the manifest. Those are not the same number: `1/5` has no exact
+binary representation, so `p/5 != 0.2*p`, and the serving path diverged from the
+saved array on **79,690 of 254,655 rows** at `max |delta| 4.4e-16`.
+
+Twelve orders of magnitude below anything that matters — but it is the
+difference between a parity test that asserts bitwise equality and one that
+asserts "close enough", and the second kind cannot tell a real feature bug from
+rounding. `predict_raw` now divides the same way training did when the weights
+are uniform, and the test asserts exact equality.
+
 ## Dead ends
 
 Anything tried that did not work, so it is not tried twice. One row each.
@@ -529,3 +606,5 @@ Anything tried that did not work, so it is not tried twice. One row each.
 | `tenure_bucket` — `tenure` cut at 12/24 as a category | Same measurement as above; the two were dropped together. A bucketing of a numeric column the model already holds is the "rescaling of one column" case notebook 02 warned about — the categorical framing buys a subset split the tree cannot otherwise express, and that turned out to be worth nothing. | 0904_202324 vs 0904_202729 |
 | Logistic regression (L2, one-hot + standardised numerics) as a blend member | Structurally different as intended — it dissents on 3.65% of ranked pairs against CatBoost's 1.10% — but 0.008438 behind LightGBM solo, which forces the dissent to 62/38 against it. Added to the blend it is worth +0.00000005 and takes weight 0.0044; no weight in [0, 0.2] does better. Different is not enough, it also has to be competitive. | 0905_015118 vs 0905_015321 |
 | MLPClassifier (128, 64) on one-hot + standardised numerics as a blend member | Fixed the linear model's problem and still failed. Gap to LightGBM more than halved (0.008438 -> 0.003629) and dissent duly rebalanced (61.5% -> 57.3%), but the blend weight is 0.0000 and no weight in [0, 0.5] gains anything. The bar implied by `balance = 1/2 + gap/(2d)` is a solo score of 0.916151 at its 2.40% disagreement — within 0.00024 of LightGBM — and it is 0.0034 short. | 0905_020138 vs 0905_020201 |
+| `full_refit` as the served artifact — one fit on 100% of train | Not rejected on score: **there is no score**. A 100%-of-train fit has no out-of-fold rows, so the artifact cannot be evaluated honestly, and the LB cannot resolve the difference (paired noise ~0.00008). Its procedure — a fixed round count instead of early stopping — measurably costs -0.000034, negative in 5/5 folds. Meanwhile `fold_average` reproduces the saved `test_*.npy` bitwise, so what is served is provably what scored LB 0.91393. Kept in the bundle, reachable via `MODEL_STRATEGY`. | 1024_143040 vs 1024_141318 |
+| Rebuilding the serving frame with `basic_clean` / `build_features` | `basic_clean` ends in `drop_duplicates()`: three identical customers in one batch collapse to one row and the response comes back misaligned with the request (verified: 3 in, 1 out). `build_features` calls `as_categorical`, which rebuilds the category lists *from the request* — so codes would be derived from whatever levels that batch happened to contain. `src/predict.py` uses `normalise_columns` plus the manifest's pinned lists instead. | PR #6 |
