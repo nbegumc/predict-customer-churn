@@ -188,8 +188,11 @@ def test_champion_bundle_reproduces_the_retained_predictions():
     """
     log = pd.read_csv(C.ROOT / "experiments.csv").set_index("run_id")
     repack = [r for r in log.index if "repackage" in str(log.loc[r, "notes"])]
-    if not repack:
-        pytest.skip("no repackaging run logged yet")
-    ref = np.load(C.EXPERIMENTS / "test_0904_202729_lgbm.npy")
+    reference = C.EXPERIMENTS / "test_0904_202729_lgbm.npy"
+    # experiments.csv is committed but experiments/*.npy is gitignored, so a
+    # logged run is not evidence that its arrays are on this machine.
+    if not repack or not reference.exists():
+        pytest.skip("champion arrays not present (experiments/ is gitignored)")
+    ref = np.load(reference)
     new = np.load(C.EXPERIMENTS / f"test_{repack[-1]}.npy")
     assert np.array_equal(ref, new)
