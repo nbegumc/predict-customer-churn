@@ -1,0 +1,49 @@
+# Keep the build context small. Without this, `docker build` uploads
+# data/raw (77MB) and experiments/ (~120MB) before the first layer runs.
+#
+# Note what is NOT here: models/ is gitignored but must stay in the context,
+# because the Dockerfile copies models/$MODEL_RUN_ID into the image.
+
+# data and run artifacts — never needed to build or serve
+data/
+experiments/
+submissions/
+mlruns/
+mlflow.db
+logs/
+reports/
+
+# training-time and authoring-time material
+notebooks/
+tests/
+kaggle/
+scripts/
+
+# local environment
+.venv/
+venv/
+__pycache__/
+**/__pycache__/
+*.py[cod]
+.ruff_cache/
+.pytest_cache/
+.ipynb_checkpoints/
+
+# vcs and tooling
+.git/
+.github/
+.gitignore
+.dvc/
+.pre-commit-config.yaml
+Makefile
+docker-compose.yml
+Dockerfile
+.dockerignore
+
+# docs
+*.md
+docs/
+
+# os
+.DS_Store
+Thumbs.db
