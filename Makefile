@@ -1,4 +1,4 @@
-.PHONY: setup hooks hooks-update data baseline push-utils clean lint requirements
+.PHONY: setup hooks hooks-update data baseline push-utils clean lint requirements test mlflow-ui
 
 # first-time setup: environment + git hooks
 setup:
@@ -29,6 +29,14 @@ requirements:
 
 push-utils:
 	uv run kaggle datasets version -p kaggle/utils -m "sync src/"
+
+test:
+	uv run pytest
+
+# browse the tracking store. SQLite rather than ./mlruns because the model
+# registry needs a database-backed backend; see docs/adr/0001-mlflow.md
+mlflow-ui:
+	uv run mlflow ui --backend-store-uri $${MLFLOW_TRACKING_URI:-sqlite:///mlflow.db} --port 5000
 
 # run every pre-commit hook without committing
 lint:

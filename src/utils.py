@@ -6,6 +6,7 @@ import csv
 import json
 import os
 import random
+import subprocess
 import time
 from contextlib import contextmanager
 from datetime import datetime
@@ -81,6 +82,86 @@ def log_experiment(
             }
         )
     print(f"logged {run_id}: cv={cv_score:.6f}")
+
+
+class _NoMlflow:
+    """Swallows every mlflow call, so train.py needs no conditionals.
+
+    Exists for one documented reason: the README documents
+    `from src.train import run` inside a Kaggle kernel, and
+    `kaggle/kernel-metadata.json` sets `enable_internet: false`, so mlflow is
+    not installed there. Without this, importing mlflow at module scope would
+    break the kernel path.
+    """
+
+    def __getattr__(self, _name):
+        return lambda *_a, **_k: None
+
+
+@contextmanager
+def mlflow_run(run_id: str, model: str, notes: str = ""):
+    """Mirror one training run into MLflow, yielding the module (or a shim).
+
+    This is a *second* sink, not a replacement. `experiments.csv` stays the file
+    `blend.py` reads to check fold fingerprints, and `log_experiment` below is
+    untouched — note that it writes the CSV header only when the file is absent,
+    so adding a column there would append 8-value rows under a 7-column header.
+    The link runs the other way: the repo's `run_id` is an MLflow tag, so a run
+    and a CSV row are joinable by eye and by query.
+
+    Pointing MLFLOW_TRACKING_URI at an Azure ML workspace is the entire
+    migration — Azure ML speaks MLflow natively and this code does not change.
+    """
+    try:
+        import mlflow
+    except ImportError:
+        yield _NoMlflow()
+        return
+
+    mlflow.set_tracking_uri(C.MLFLOW_TRACKING_URI)
+    mlflow.set_experiment(C.MLFLOW_EXPERIMENT)
+    with mlflow.start_run(run_name=run_id):
+        mlflow.set_tags(
+            {
+                "run_id": run_id,
+                "model": model,
+                "competition": C.COMPETITION,
+                "cv_scheme": C.CV_SCHEME,
+                "n_folds": C.N_FOLDS,
+                "seed": C.SEED,
+                "git_sha": git_sha(),
+                "notes": notes,
+            }
+        )
+        yield mlflow
+
+
+def git_sha() -> str:
+    """Short HEAD, marked dirty when the tree has uncommitted changes.
+
+    A run whose code is unrecorded is a run you cannot reproduce, and `-dirty`
+    is the honest answer when the tree did not match any commit.
+    """
+    try:
+        sha = subprocess.run(
+            ["git", "rev-parse", "--short", "HEAD"],
+            capture_output=True,
+            text=True,
+            check=False,
+            cwd=C.ROOT,
+        ).stdout.strip()
+        if not sha:
+            return "unknown"
+        dirty = subprocess.run(
+            ["git", "status", "--porcelain"],
+            capture_output=True,
+            text=True,
+            check=False,
+            cwd=C.ROOT,
+        ).stdout.strip()
+        return f"{sha}-dirty" if dirty else sha
+    except OSError:  # no git binary, e.g. a Kaggle kernel
+        return "unknown"
 
 
 def save_oof(

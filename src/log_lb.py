@@ -17,6 +17,7 @@ import sys
 
 import pandas as pd
 
+from . import config as C
 from .utils import LOG_FILE
 
 
@@ -37,6 +38,38 @@ def set_lb(run_id: str, score: float) -> None:
     was = "" if pd.isna(previous) else f" (was {previous})"
     cv_score = df.loc[match, "cv_score"].iloc[0]
     print(f"{run_id}: cv={cv_score:.6f}  public_lb={score:.6f}{was}")
+    _mirror_to_mlflow(run_id, score)
+
+
+def _mirror_to_mlflow(run_id: str, score: float) -> None:
+    """Write the LB score onto the matching MLflow run as well.
+
+    Kaggle only tells you the score after you submit, so `src.train` leaves it
+    blank in both stores. Filling in only the CSV would let the two disagree,
+    and a tracking server that is missing the one number the competition
+    actually scores you on is worth less than no tracking server.
+
+    Best-effort: a missing mlflow, an unreachable tracking store or a run that
+    predates tracking must never cost you a recorded LB score.
+    """
+    try:
+        import mlflow
+    except ImportError:
+        return
+    try:
+        mlflow.set_tracking_uri(C.MLFLOW_TRACKING_URI)
+        found = mlflow.search_runs(
+            experiment_names=[C.MLFLOW_EXPERIMENT],
+            filter_string=f"tags.run_id = '{run_id}'",
+        )
+        if found.empty:
+            print(f"  (no MLflow run tagged run_id={run_id}; CSV updated anyway)")
+            return
+        with mlflow.start_run(run_id=found.loc[0, "run_id"]):
+            mlflow.log_metric("public_lb", score)
+        print(f"  (mirrored public_lb to MLflow run {found.loc[0, 'run_id'][:8]})")
+    except Exception as exc:  # noqa: BLE001 - never let tracking break the log
+        print(f"  (MLflow mirror skipped: {type(exc).__name__}: {exc})")
 
 
 def compare() -> None:
