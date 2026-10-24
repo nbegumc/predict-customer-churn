@@ -43,3 +43,4 @@ reports/drift_*.html
 # dvc keeps pointers in git; the cache and tmp dirs stay local
 .dvc/cache/
 .dvc/tmp/
+dist/
