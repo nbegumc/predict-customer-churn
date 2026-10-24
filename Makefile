@@ -1,4 +1,4 @@
-.PHONY: setup hooks hooks-update data baseline blend push-utils clean lint requirements
+.PHONY: setup hooks hooks-update data baseline push-utils clean lint requirements
 
 # first-time setup: environment + git hooks
 setup:
