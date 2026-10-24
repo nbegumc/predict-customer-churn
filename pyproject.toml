@@ -66,6 +66,9 @@ default-groups = ["train", "notebook", "kaggle", "mlops", "dev"]
 testpaths = ["tests"]
 addopts = "-q --strict-markers"
 markers = ["realdata: needs data/raw, which is gitignored (skipped when absent)"]
+# src/ is a namespace package imported from the repo root rather than installed
+# (`package = false` above), so pytest needs the root on sys.path to see it.
+pythonpath = ["."]
 
 [tool.ruff]
 line-length = 100
