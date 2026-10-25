@@ -103,17 +103,27 @@ MODEL_DIR = WORK / "models"
 # registry needs a database-backed store and a file in the repo is still zero
 # infrastructure. Point MLFLOW_TRACKING_URI at an Azure ML workspace and the
 # same logging code works unchanged — that env var is the whole migration.
-MLFLOW_TRACKING_URI = os.getenv("MLFLOW_TRACKING_URI", f"sqlite:///{WORK / 'mlflow.db'}")
+# The database sits inside mlruns/ beside the artifacts it points to, so the
+# whole store is one directory. docker-compose mounts that directory into the
+# MLflow container at the same absolute path, because MLflow records artifact
+# locations as absolute paths -- anything else gives the UI a database whose
+# artifact links do not resolve.
+MLRUNS = WORK / "mlruns"
+MLFLOW_TRACKING_URI = os.getenv("MLFLOW_TRACKING_URI", f"sqlite:///{MLRUNS / 'mlflow.db'}")
 MLFLOW_EXPERIMENT = os.getenv("MLFLOW_EXPERIMENT", COMPETITION)
 
 # Risk bands for the API, as probability thresholds. These are a *business*
 # decision, not a model property: they come from the lift curve in
 # notebooks/99_final_writeup.ipynb, where the top 10% of the ranked call list
 # runs at 3.7x the base rate and the top 30% reaches 82% of churners at 2.7x.
-# Measured on the champion's OOF distribution: p90 = 0.711, p70 = 0.311.
+# Measured on what is actually served -- the champion's fold_average scores
+# over the 254,655 test rows: p90 = 0.694, p70 = 0.295, which put exactly 10.00%
+# and 30.01% of customers in the high and medium-or-high bands. An earlier
+# version used OOF quantiles (0.711 / 0.311); OOF is one fold model per row and
+# more dispersed than the five-model mean, so only 9.18% reached "high".
 # A bundle carrying its own score_quantiles overrides these.
-RISK_BAND_HIGH = 0.711
-RISK_BAND_MEDIUM = 0.311
+RISK_BAND_HIGH = 0.694
+RISK_BAND_MEDIUM = 0.295
 
 # One JSON line per served prediction. The input src.monitor reads to build a
 # drift report; append-only, and never on the request's critical path.
@@ -123,6 +133,15 @@ PRED_LOG = WORK / "logs" / "predictions.jsonl"
 # read-only mount this raises EROFS even when the directory is already there.
 # Every module in src/ imports this one, so an unguarded failure here would take
 # down the API too. Nothing on the inference path writes to these directories.
-for _p in (INTERIM, PROCESSED, SUBMISSIONS, EXPERIMENTS, FIGURES, MODEL_DIR, PRED_LOG.parent):
+for _p in (
+    INTERIM,
+    PROCESSED,
+    SUBMISSIONS,
+    EXPERIMENTS,
+    FIGURES,
+    MODEL_DIR,
+    MLRUNS,
+    PRED_LOG.parent,
+):
     with contextlib.suppress(OSError):
         _p.mkdir(parents=True, exist_ok=True)

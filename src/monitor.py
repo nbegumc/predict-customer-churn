@@ -188,7 +188,7 @@ def _log_to_mlflow(summary: dict, html) -> None:
             mlflow.set_tag("kind", "drift-report")
             mlflow.log_metrics({k: v for k, v in summary.items() if isinstance(v, (int, float))})
             mlflow.log_artifact(str(html))
-    except Exception as exc:  # noqa: BLE001 - monitoring must not break on tracking
+    except Exception as exc:  # monitoring must not break on tracking
         print(f"(MLflow logging skipped: {type(exc).__name__}: {exc})")
 
 

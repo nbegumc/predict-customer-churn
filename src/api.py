@@ -142,13 +142,13 @@ OUT_OF_RANGE = Counter(
 )
 MODEL = Info("churn_model", "Which bundle is serving")
 
-STATE: dict = {"bundle": None, "error": None, "out_of_range": {}}
+STATE: dict = {"bundle": None, "error": None}
 
 
 def _reset_state() -> None:
     """Every key the request path reads. Called on startup and shutdown, so a
     second app instance in the same process never finds a half-empty dict."""
-    STATE.update({"bundle": None, "error": None, "out_of_range": {}})
+    STATE.update({"bundle": None, "error": None})
 
 
 def _check_schema_matches_bundle(bundle: P.Bundle) -> None:
@@ -195,7 +195,17 @@ async def lifespan(_app: FastAPI):
                     f"no bundle in {C.MODEL_DIR} and MODEL_RUN_ID is unset. "
                     "Train one with `uv run python -m src.train --full-refit`."
                 )
-            run_id = candidates[-1]
+            # Exactly one bundle (the container case) is unambiguous. More than
+            # one is not: picking the newest once served a fixed-rounds
+            # experiment instead of the champion, and %m%d run ids have no year,
+            # so "newest" is not even well defined across a new year.
+            if len(candidates) > 1:
+                raise LookupError(
+                    f"MODEL_RUN_ID is unset and {C.MODEL_DIR} holds {len(candidates)} bundles "
+                    f"({', '.join(candidates)}). Refusing to guess which one to serve; "
+                    "set MODEL_RUN_ID (see .env.example)."
+                )
+            run_id = candidates[0]
         bundle = P.load_bundle(run_id, strategy)
         _check_schema_matches_bundle(bundle)
         STATE["bundle"] = bundle
@@ -208,7 +218,7 @@ async def lifespan(_app: FastAPI):
             }
         )
         print(f"loaded {bundle.run_id} [{bundle.strategy}, {len(bundle.members)} member(s)]")
-    except Exception as exc:  # noqa: BLE001 - reported via /ready instead
+    except Exception as exc:  # reported via /ready instead of crash-looping
         STATE["error"] = f"{type(exc).__name__}: {exc}"
         print(f"model load FAILED: {STATE['error']}")
     yield
@@ -238,8 +248,22 @@ def _count_out_of_range(frame: pd.DataFrame) -> None:
     for col, (lo, hi) in PLAUSIBLE.items():
         n = int(((frame[col] < lo) | (frame[col] > hi)).sum())
         if n:
-            STATE["out_of_range"][col] = STATE["out_of_range"].get(col, 0) + n
             OUT_OF_RANGE.labels(field=col).inc(n)
+
+
+def _out_of_range_counts() -> dict[str, int]:
+    """Read the counts back from the Prometheus counter, the single source.
+
+    An earlier version kept a parallel dict in STATE, updated by an unlocked
+    read-modify-write from threadpool handlers. prometheus_client counters are
+    thread-safe, so the duplicate (and the lock it then needed) are gone.
+    """
+    return {
+        sample.labels["field"]: int(sample.value)
+        for family in OUT_OF_RANGE.collect()
+        for sample in family.samples
+        if sample.name.endswith("_total")
+    }
 
 
 def _log_predictions(frame: pd.DataFrame, probabilities) -> None:
@@ -317,7 +341,7 @@ def ready() -> dict:
 @app.get("/model", tags=["ops"])
 def model_info() -> dict:
     """The manifest, minus hyperparameters. What is being served, and from what."""
-    return _bundle().describe() | {"out_of_range_inputs": STATE["out_of_range"]}
+    return _bundle().describe() | {"out_of_range_inputs": _out_of_range_counts()}
 
 
 @app.post("/predict", response_model=Prediction, tags=["scoring"])

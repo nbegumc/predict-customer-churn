@@ -108,7 +108,7 @@ First time only: `uv run kaggle datasets create -p kaggle/utils`.
 make serve                 # API on :8000 with reload -- http://localhost:8000/docs
 make up                    # api + mlflow + prometheus in docker
 make down
-make mlflow-ui             # tracking UI on :5000 without docker
+make mlflow-ui             # tracking UI on :5001 without docker (5000 is macOS AirPlay)
 
 make reference             # build the drift baseline from data/raw/train.csv (once)
 make drift                 # live traffic vs that baseline -> reports/drift_<date>.html

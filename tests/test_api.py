@@ -14,6 +14,7 @@ import pandas as pd
 import pytest
 from fastapi.testclient import TestClient
 
+from src import api as A
 from src import config as C
 from src import predict as P
 from src import train as T
@@ -208,13 +209,65 @@ def test_model_endpoint_describes_the_bundle_without_leaking_params(client):
 
 def test_risk_band_uses_the_bundles_own_quantiles(client):
     """Bands are a threshold on the ranked population, so they need the score
-    distribution. A freshly trained bundle pins its own."""
+    distribution -- of what each strategy actually serves."""
     bundle = P.load_bundle(client.get("/ready").json()["run_id"])
-    quantiles = bundle.manifest["score_quantiles"]
-    assert quantiles, "a new bundle should pin its score distribution"
+    per_strategy = bundle.manifest["score_quantiles"]
+    assert set(per_strategy) == {"fold_average", "full_refit"}
+    quantiles = per_strategy["fold_average"]
     assert bundle.risk_band(float(quantiles["0.9"]) + 1e-9) == "high"
     assert bundle.risk_band(float(quantiles["0.7"]) + 1e-9) == "medium"
     assert bundle.risk_band(0.0) == "low"
+
+
+def test_bands_hit_their_intended_share_of_served_scores(client, synthetic_raw):
+    """Regression: thresholds were once taken from OOF, which is more dispersed
+    than the five-model mean that is served, so 'high' caught 9.18% of real
+    customers instead of 10%. Calibrated on served scores, it is exact."""
+    import numpy as np
+
+    bundle = P.load_bundle(client.get("/ready").json()["run_id"])
+    served = P.predict_raw(bundle, synthetic_raw.drop(columns=["Churn"]))
+    high = float(bundle.manifest["score_quantiles"]["fold_average"]["0.9"])
+    assert np.isclose((served >= high).mean(), 0.10, atol=0.01)
+
+
+def test_an_ambiguous_model_dir_is_refused_not_guessed(client, monkeypatch):
+    """Regression: with MODEL_RUN_ID unset the API served the lexically-newest
+    bundle -- which once meant a fixed-rounds experiment, not the champion."""
+    import shutil
+
+    run_id = client.get("/ready").json()["run_id"]
+    shutil.copytree(C.MODEL_DIR / run_id, C.MODEL_DIR / "1231_235959_lgbm")
+    monkeypatch.delenv("MODEL_RUN_ID")
+    with TestClient(app) as c:
+        response = c.get("/ready")
+        assert response.status_code == 503
+        assert "MODEL_RUN_ID" in response.json()["detail"]
+        assert "Refusing to guess" in response.json()["detail"]
+        assert c.get("/health").status_code == 200  # still alive, just not ready
+
+
+def test_a_single_bundle_is_used_without_naming_it(client, monkeypatch):
+    """The container case: exactly one bundle is unambiguous."""
+    run_id = client.get("/ready").json()["run_id"]
+    monkeypatch.delenv("MODEL_RUN_ID")
+    with TestClient(app) as c:
+        assert c.get("/ready").json()["run_id"] == run_id
+
+
+def test_out_of_range_counter_does_not_lose_concurrent_updates(client):
+    """Sync endpoints run in a threadpool. The counts live only in the
+    Prometheus counter, which is thread-safe, so concurrent requests cannot
+    overwrite each other's increments."""
+    from concurrent.futures import ThreadPoolExecutor
+
+    from src.api import _count_out_of_range
+
+    frame = pd.DataFrame([{**EXAMPLE, "monthlycharges": 130.0}])
+    before = A._out_of_range_counts().get("monthlycharges", 0)
+    with ThreadPoolExecutor(max_workers=8) as pool:
+        list(pool.map(lambda _: _count_out_of_range(frame), range(4000)))
+    assert A._out_of_range_counts()["monthlycharges"] - before == 4000
 
 
 def test_strategy_is_switchable_by_env_var(client, monkeypatch):
