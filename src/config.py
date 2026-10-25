@@ -95,10 +95,11 @@ MODEL_DIR = WORK / "models"
 # infrastructure. Point MLFLOW_TRACKING_URI at an Azure ML workspace and the
 # same logging code works unchanged — that env var is the whole migration.
 # The database sits inside mlruns/ beside the artifacts it points to, so the
-# whole store is one directory. docker-compose mounts that directory into the
-# MLflow container at the same absolute path, because MLflow records artifact
-# locations as absolute paths -- anything else gives the UI a database whose
-# artifact links do not resolve.
+# whole store is one directory: point MLFLOW_TRACKING_URI somewhere else -- as
+# every test fixture does -- and the artifacts follow (see utils.artifact_root).
+# docker-compose mounts that directory into the MLflow container at the same
+# absolute path, because MLflow records artifact locations as absolute paths --
+# anything else gives the UI a database whose artifact links do not resolve.
 MLRUNS = WORK / "mlruns"
 MLFLOW_TRACKING_URI = os.getenv("MLFLOW_TRACKING_URI", f"sqlite:///{MLRUNS / 'mlflow.db'}")
 MLFLOW_EXPERIMENT = os.getenv("MLFLOW_EXPERIMENT", COMPETITION)
