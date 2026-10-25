@@ -10,6 +10,7 @@ import subprocess
 import time
 from contextlib import contextmanager
 from datetime import datetime
+from pathlib import Path
 
 import numpy as np
 
@@ -125,6 +126,33 @@ class _SafeMlflow:
         return guarded
 
 
+def artifact_root() -> str | None:
+    """Where a new experiment's artifacts go: beside its SQLite database.
+
+    Left to itself, MLflow puts a new experiment's artifacts in ./mlruns
+    relative to the *working directory*, not to the tracking store. So a store
+    pointed elsewhere still wrote its artifacts into the repo -- every test
+    fixture redirects the database to a tmp dir, and over one day of test runs
+    that left ~1,100 runs and 226MB in the real mlruns/. Deriving the location
+    from the tracking URI, read at call time, means anything that moves the
+    database moves the artifacts with it.
+
+    None for a tracking server (or Azure ML): the server decides.
+    """
+    uri = C.MLFLOW_TRACKING_URI
+    if not uri.startswith("sqlite:///"):
+        return None
+    database = Path(uri.removeprefix("sqlite:///")).resolve()
+    return str(database.parent / C.MLFLOW_EXPERIMENT)
+
+
+def use_experiment(mlflow) -> None:
+    """Select the experiment, creating it with artifacts stored beside the DB."""
+    if mlflow.get_experiment_by_name(C.MLFLOW_EXPERIMENT) is None:
+        mlflow.create_experiment(C.MLFLOW_EXPERIMENT, artifact_location=artifact_root())
+    mlflow.set_experiment(C.MLFLOW_EXPERIMENT)
+
+
 @contextmanager
 def mlflow_run(run_id: str, model: str, notes: str = ""):
     """Mirror one training run into MLflow, yielding the module (or a shim).
@@ -152,7 +180,7 @@ def mlflow_run(run_id: str, model: str, notes: str = ""):
 
     try:
         mlflow.set_tracking_uri(C.MLFLOW_TRACKING_URI)
-        mlflow.set_experiment(C.MLFLOW_EXPERIMENT)
+        use_experiment(mlflow)
         mlflow.start_run(run_name=run_id)
     except Exception as exc:
         print(f"(MLflow unavailable; training continues untracked: {type(exc).__name__}: {exc})")
