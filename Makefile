@@ -1,4 +1,11 @@
-.PHONY: setup hooks hooks-update data baseline push-utils clean lint requirements test mlflow-ui
+# MODEL_RUN_ID / MODEL_STRATEGY come from .env (copy .env.example). The API
+# refuses to guess when models/ holds more than one bundle, so `make serve` and
+# `make docker-build` need it set.
+-include .env
+export MODEL_RUN_ID MODEL_STRATEGY
+
+.PHONY: setup hooks hooks-update data baseline push-utils clean lint requirements test mlflow-ui \
+	serve docker-build up down
 
 # first-time setup: environment + git hooks
 setup:
@@ -36,7 +43,21 @@ test:
 # browse the tracking store. SQLite rather than ./mlruns because the model
 # registry needs a database-backed backend; see docs/adr/0001-mlflow.md
 mlflow-ui:
-	uv run mlflow ui --backend-store-uri $${MLFLOW_TRACKING_URI:-sqlite:///mlruns/mlflow.db} --port 5000
+	uv run mlflow ui --backend-store-uri $${MLFLOW_TRACKING_URI:-sqlite:///mlruns/mlflow.db} --port 5001
+
+# the API on the host, reloading on edit
+serve:
+	uv run uvicorn src.api:app --reload --port 8000
+
+# MODEL_RUN_ID comes from .env (see .env.example)
+docker-build:
+	docker build --build-arg MODEL_RUN_ID=$(MODEL_RUN_ID) -t churn-api:local .
+
+up:
+	docker compose up -d --build
+
+down:
+	docker compose down
 
 # run every pre-commit hook without committing
 lint:
