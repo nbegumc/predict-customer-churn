@@ -98,16 +98,48 @@ class _NoMlflow:
         return lambda *_a, **_k: None
 
 
+class _SafeMlflow:
+    """Forwards to mlflow, turning any tracking failure into a printed warning.
+
+    MLflow is the second sink. Left unguarded, a locked SQLite file, a full disk
+    or an unreachable server would raise mid-run — after the OOF arrays,
+    submission and bundle were saved, but before `log_experiment` wrote the
+    experiments.csv row. The secondary record would erase the primary one.
+    """
+
+    def __init__(self, module):
+        self._mlflow = module
+
+    def __getattr__(self, name):
+        attr = getattr(self._mlflow, name)
+        if not callable(attr):
+            return attr
+
+        def guarded(*args, **kwargs):
+            try:
+                return attr(*args, **kwargs)
+            except Exception as exc:
+                print(f"(mlflow.{name} failed; training continues: {type(exc).__name__}: {exc})")
+                return None
+
+        return guarded
+
+
 @contextmanager
 def mlflow_run(run_id: str, model: str, notes: str = ""):
     """Mirror one training run into MLflow, yielding the module (or a shim).
 
-    This is a *second* sink, not a replacement. `experiments.csv` stays the file
-    `blend.py` reads to check fold fingerprints, and `log_experiment` below is
-    untouched — note that it writes the CSV header only when the file is absent,
-    so adding a column there would append 8-value rows under a 7-column header.
-    The link runs the other way: the repo's `run_id` is an MLflow tag, so a run
-    and a CSV row are joinable by eye and by query.
+    This is a *second* sink, not a replacement, and it is built so it cannot
+    break the first. `experiments.csv` stays the file `blend.py` reads to check
+    fold fingerprints, and `log_experiment` below is untouched — note that it
+    writes the CSV header only when the file is absent, so adding a column there
+    would append 8-value rows under a 7-column header. The link runs the other
+    way: the repo's `run_id` is an MLflow tag, so a run and a CSV row are
+    joinable by eye and by query.
+
+    If MLflow cannot start a run, training continues untracked; if any later
+    call fails, `_SafeMlflow` reports it and carries on. Only an error in
+    training itself propagates, and it marks the MLflow run FAILED on the way.
 
     Pointing MLFLOW_TRACKING_URI at an Azure ML workspace is the entire
     migration — Azure ML speaks MLflow natively and this code does not change.
@@ -118,22 +150,34 @@ def mlflow_run(run_id: str, model: str, notes: str = ""):
         yield _NoMlflow()
         return
 
-    mlflow.set_tracking_uri(C.MLFLOW_TRACKING_URI)
-    mlflow.set_experiment(C.MLFLOW_EXPERIMENT)
-    with mlflow.start_run(run_name=run_id):
-        mlflow.set_tags(
-            {
-                "run_id": run_id,
-                "model": model,
-                "competition": C.COMPETITION,
-                "cv_scheme": C.CV_SCHEME,
-                "n_folds": C.N_FOLDS,
-                "seed": C.SEED,
-                "git_sha": git_sha(),
-                "notes": notes,
-            }
-        )
-        yield mlflow
+    try:
+        mlflow.set_tracking_uri(C.MLFLOW_TRACKING_URI)
+        mlflow.set_experiment(C.MLFLOW_EXPERIMENT)
+        mlflow.start_run(run_name=run_id)
+    except Exception as exc:
+        print(f"(MLflow unavailable; training continues untracked: {type(exc).__name__}: {exc})")
+        yield _NoMlflow()
+        return
+
+    ml = _SafeMlflow(mlflow)
+    ml.set_tags(
+        {
+            "run_id": run_id,
+            "model": model,
+            "competition": C.COMPETITION,
+            "cv_scheme": C.CV_SCHEME,
+            "n_folds": C.N_FOLDS,
+            "seed": C.SEED,
+            "git_sha": git_sha(),
+            "notes": notes,
+        }
+    )
+    status = "FAILED"
+    try:
+        yield ml
+        status = "FINISHED"
+    finally:
+        ml.end_run(status=status)
 
 
 def git_sha() -> str:
@@ -174,6 +218,27 @@ def save_oof(
         (C.EXPERIMENTS / f"params_{run_id}.json").write_text(
             json.dumps(params, indent=2, default=str)
         )
+
+
+def combine_members(preds, weights) -> np.ndarray:
+    """The one definition of how member predictions become a single score.
+
+    `train.py` uses it to build the saved test_*.npy and `src/predict.py` uses
+    it at serving time, so the two cannot drift apart — which is what keeps the
+    parity test bitwise.
+
+    Accumulates in member order from zeros. With uniform weights it divides
+    each member by n rather than multiplying by 1/n: 1/5 has no exact binary
+    representation, so `p / 5` and `0.2 * p` differ in the last bit — on 79,690
+    of the 254,655 real test rows — and the champion's saved arrays were built
+    by division.
+    """
+    preds, weights = list(preds), list(weights)
+    out = np.zeros_like(np.asarray(preds[0], dtype=np.float64))
+    uniform = len(set(weights)) == 1
+    for p, w in zip(preds, weights):
+        out += p / len(preds) if uniform else w * p
+    return out
 
 
 def savefig(fig, name: str, dpi: int = 150) -> None:
