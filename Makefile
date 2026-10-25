@@ -5,7 +5,7 @@
 export MODEL_RUN_ID MODEL_STRATEGY
 
 .PHONY: setup hooks hooks-update data baseline push-utils clean lint requirements test mlflow-ui \
-	serve docker-build up down release-bundle
+	serve docker-build up down release-bundle drift reference dvc-save
 
 # first-time setup: environment + git hooks
 setup:
@@ -67,6 +67,19 @@ release-bundle:
 	mkdir -p dist
 	tar -czf dist/bundle-$(RUN_ID).tar.gz -C models $(RUN_ID)
 	@echo "dist/bundle-$(RUN_ID).tar.gz -- attach with: gh release create <tag> dist/bundle-$(RUN_ID).tar.gz"
+
+# drift: compare live traffic against the training distribution
+reference:
+	uv run python -m src.monitor build-reference
+
+drift:
+	uv run python -m src.monitor report $(if $(SINCE),--since $(SINCE),)
+
+# A training run writes new files into experiments/, which DVC then sees as
+# changed. Re-add and push, or `dvc status` stays dirty.
+dvc-save:
+	uv run dvc add experiments
+	uv run dvc push
 
 # run every pre-commit hook without committing
 lint:

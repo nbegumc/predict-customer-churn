@@ -256,17 +256,18 @@ def test_a_single_bundle_is_used_without_naming_it(client, monkeypatch):
 
 
 def test_out_of_range_counter_does_not_lose_concurrent_updates(client):
-    """Sync endpoints run in a threadpool; the counter's read-modify-write is
-    locked so concurrent requests cannot overwrite each other's increments."""
+    """Sync endpoints run in a threadpool. The counts live only in the
+    Prometheus counter, which is thread-safe, so concurrent requests cannot
+    overwrite each other's increments."""
     from concurrent.futures import ThreadPoolExecutor
 
     from src.api import _count_out_of_range
 
     frame = pd.DataFrame([{**EXAMPLE, "monthlycharges": 130.0}])
-    before = A.STATE["out_of_range"].get("monthlycharges", 0)
+    before = A._out_of_range_counts().get("monthlycharges", 0)
     with ThreadPoolExecutor(max_workers=8) as pool:
         list(pool.map(lambda _: _count_out_of_range(frame), range(4000)))
-    assert A.STATE["out_of_range"]["monthlycharges"] - before == 4000
+    assert A._out_of_range_counts()["monthlycharges"] - before == 4000
 
 
 def test_strategy_is_switchable_by_env_var(client, monkeypatch):

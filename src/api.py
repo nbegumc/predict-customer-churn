@@ -23,14 +23,17 @@ Conflating "out of domain" with "out of range" is the standard mistake here.
 
 from __future__ import annotations
 
+import json
 import os
-import threading
+import time
 from contextlib import asynccontextmanager
+from datetime import datetime
 from typing import Literal
 
 import pandas as pd
 from fastapi import FastAPI, HTTPException
 from fastapi.responses import HTMLResponse
+from prometheus_client import Counter, Histogram, Info, make_asgi_app
 from pydantic import AliasChoices, BaseModel, ConfigDict, Field
 
 from . import config as C
@@ -122,16 +125,30 @@ class BatchResponse(BaseModel):
     predictions: list[Prediction]
 
 
-STATE: dict = {"bundle": None, "error": None, "out_of_range": {}}
-# FastAPI runs sync `def` endpoints in a threadpool, so the out-of-range
-# counter is updated concurrently and needs a lock around its read-modify-write.
-_STATE_LOCK = threading.Lock()
+# Five metrics, hand-rolled on prometheus_client rather than pulling in an
+# instrumentator package to replace fifteen lines. No per-feature-value labels:
+# that is how a metrics endpoint turns into a cardinality incident.
+PREDICTIONS = Counter("churn_predictions_total", "Rows scored", ["endpoint"])
+LATENCY = Histogram("churn_prediction_latency_seconds", "Scoring latency", ["endpoint"])
+# The cheapest drift signal there is: a shifted score distribution is the first
+# thing you notice, and it needs no labels and no reference data.
+PROBABILITY = Histogram(
+    "churn_predicted_probability",
+    "Distribution of predicted churn probability",
+    buckets=[i / 10 for i in range(11)],
+)
+OUT_OF_RANGE = Counter(
+    "churn_out_of_range_inputs_total", "Values outside the training range", ["field"]
+)
+MODEL = Info("churn_model", "Which bundle is serving")
+
+STATE: dict = {"bundle": None, "error": None}
 
 
 def _reset_state() -> None:
     """Every key the request path reads. Called on startup and shutdown, so a
     second app instance in the same process never finds a half-empty dict."""
-    STATE.update({"bundle": None, "error": None, "out_of_range": {}})
+    STATE.update({"bundle": None, "error": None})
 
 
 def _check_schema_matches_bundle(bundle: P.Bundle) -> None:
@@ -192,6 +209,14 @@ async def lifespan(_app: FastAPI):
         bundle = P.load_bundle(run_id, strategy)
         _check_schema_matches_bundle(bundle)
         STATE["bundle"] = bundle
+        MODEL.info(
+            {
+                "run_id": bundle.run_id,
+                "strategy": bundle.strategy,
+                "cv_score": str(bundle.manifest["cv_score"]),
+                "fold_fingerprint": bundle.manifest["fold_fingerprint"],
+            }
+        )
         print(f"loaded {bundle.run_id} [{bundle.strategy}, {len(bundle.members)} member(s)]")
     except Exception as exc:  # reported via /ready instead of crash-looping
         STATE["error"] = f"{type(exc).__name__}: {exc}"
@@ -223,15 +248,55 @@ def _count_out_of_range(frame: pd.DataFrame) -> None:
     for col, (lo, hi) in PLAUSIBLE.items():
         n = int(((frame[col] < lo) | (frame[col] > hi)).sum())
         if n:
-            with _STATE_LOCK:
-                STATE["out_of_range"][col] = STATE["out_of_range"].get(col, 0) + n
+            OUT_OF_RANGE.labels(field=col).inc(n)
 
 
-def _score(customers: list[Customer]) -> list[Prediction]:
+def _out_of_range_counts() -> dict[str, int]:
+    """Read the counts back from the Prometheus counter, the single source.
+
+    An earlier version kept a parallel dict in STATE, updated by an unlocked
+    read-modify-write from threadpool handlers. prometheus_client counters are
+    thread-safe, so the duplicate (and the lock it then needed) are gone.
+    """
+    return {
+        sample.labels["field"]: int(sample.value)
+        for family in OUT_OF_RANGE.collect()
+        for sample in family.samples
+        if sample.name.endswith("_total")
+    }
+
+
+def _log_predictions(frame: pd.DataFrame, probabilities) -> None:
+    """One JSON line per scored row — the input src.monitor reads.
+
+    Best-effort and append-only: a full disk must not take down scoring. It is
+    a synchronous write, which is fine at this scale and is the thing to move
+    off the request path first if throughput ever matters.
+    """
+    try:
+        now = f"{datetime.now().astimezone():%Y-%m-%dT%H:%M:%S%z}"
+        with C.PRED_LOG.open("a") as handle:
+            for row, probability in zip(frame.to_dict("records"), probabilities):
+                handle.write(
+                    json.dumps({**row, PREDICTION_KEY: float(probability), "ts": now}) + "\n"
+                )
+    except OSError as exc:
+        print(f"prediction log write skipped: {exc}")
+
+
+def _score(customers: list[Customer], endpoint: str = "/predict") -> list[Prediction]:
     bundle = _bundle()
     frame = pd.DataFrame([c.model_dump() for c in customers])
     _count_out_of_range(frame)
+
+    started = time.perf_counter()
     probabilities = P.predict_raw(bundle, frame)
+    LATENCY.labels(endpoint=endpoint).observe(time.perf_counter() - started)
+    PREDICTIONS.labels(endpoint=endpoint).inc(len(probabilities))
+    for probability in probabilities:
+        PROBABILITY.observe(float(probability))
+    _log_predictions(frame, probabilities)
+
     return [
         Prediction(
             churn_probability=float(p),
@@ -241,6 +306,13 @@ def _score(customers: list[Customer]) -> list[Prediction]:
         )
         for p in probabilities
     ]
+
+
+# Prometheus scrapes this. Mounted as a sub-app rather than wrapped in a
+# route, so the exposition format is handled by the client library.
+app.mount("/metrics", make_asgi_app())
+
+PREDICTION_KEY = "churn_probability"
 
 
 @app.get("/health", tags=["ops"])
@@ -269,9 +341,7 @@ def ready() -> dict:
 @app.get("/model", tags=["ops"])
 def model_info() -> dict:
     """The manifest, minus hyperparameters. What is being served, and from what."""
-    with _STATE_LOCK:
-        counts = dict(STATE["out_of_range"])
-    return _bundle().describe() | {"out_of_range_inputs": counts}
+    return _bundle().describe() | {"out_of_range_inputs": _out_of_range_counts()}
 
 
 @app.post("/predict", response_model=Prediction, tags=["scoring"])
@@ -283,7 +353,7 @@ def predict_one(customer: Customer) -> Prediction:
     was ever chosen. Picking one is a business decision about retention budget —
     `risk_band` reports where the customer falls in the scored population.
     """
-    return _score([customer])[0]
+    return _score([customer], "/predict")[0]
 
 
 @app.post("/predict/batch", response_model=BatchResponse, tags=["scoring"])
@@ -293,7 +363,7 @@ def predict_batch(request: BatchRequest) -> BatchResponse:
     Alignment is a real guarantee, not an incidental one: `data.basic_clean`
     would have deduplicated the frame and returned fewer rows than were sent.
     """
-    return BatchResponse(predictions=_score(request.customers))
+    return BatchResponse(predictions=_score(request.customers, "/predict/batch"))
 
 
 @app.get("/", response_class=HTMLResponse, include_in_schema=False)
