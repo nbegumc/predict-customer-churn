@@ -94,7 +94,13 @@ MODEL_DIR = WORK / "models"
 # registry needs a database-backed store and a file in the repo is still zero
 # infrastructure. Point MLFLOW_TRACKING_URI at an Azure ML workspace and the
 # same logging code works unchanged — that env var is the whole migration.
-MLFLOW_TRACKING_URI = os.getenv("MLFLOW_TRACKING_URI", f"sqlite:///{WORK / 'mlflow.db'}")
+# The database sits inside mlruns/ beside the artifacts it points to, so the
+# whole store is one directory. docker-compose mounts that directory into the
+# MLflow container at the same absolute path, because MLflow records artifact
+# locations as absolute paths -- anything else gives the UI a database whose
+# artifact links do not resolve.
+MLRUNS = WORK / "mlruns"
+MLFLOW_TRACKING_URI = os.getenv("MLFLOW_TRACKING_URI", f"sqlite:///{MLRUNS / 'mlflow.db'}")
 MLFLOW_EXPERIMENT = os.getenv("MLFLOW_EXPERIMENT", COMPETITION)
 
 # Risk bands for the API, as probability thresholds. These are a *business*
@@ -118,6 +124,15 @@ PRED_LOG = WORK / "logs" / "predictions.jsonl"
 # read-only mount this raises EROFS even when the directory is already there.
 # Every module in src/ imports this one, so an unguarded failure here would take
 # down the API too. Nothing on the inference path writes to these directories.
-for _p in (INTERIM, PROCESSED, SUBMISSIONS, EXPERIMENTS, FIGURES, MODEL_DIR, PRED_LOG.parent):
+for _p in (
+    INTERIM,
+    PROCESSED,
+    SUBMISSIONS,
+    EXPERIMENTS,
+    FIGURES,
+    MODEL_DIR,
+    MLRUNS,
+    PRED_LOG.parent,
+):
     with contextlib.suppress(OSError):
         _p.mkdir(parents=True, exist_ok=True)
