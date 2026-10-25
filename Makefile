@@ -5,7 +5,7 @@
 export MODEL_RUN_ID MODEL_STRATEGY
 
 .PHONY: setup hooks hooks-update data baseline push-utils clean lint requirements test mlflow-ui \
-	serve docker-build up down
+	serve docker-build up down release-bundle
 
 # first-time setup: environment + git hooks
 setup:
@@ -58,6 +58,15 @@ up:
 
 down:
 	docker compose down
+
+# tar a bundle for a GitHub Release -- the model channel, since 30MB can
+# never go in git. `make release-bundle RUN_ID=1024_141318_lgbm`
+release-bundle:
+	@test -n "$(RUN_ID)" || { echo "usage: make release-bundle RUN_ID=<run_id>"; exit 1; }
+	@test -f models/$(RUN_ID)/manifest.json || { echo "no bundle at models/$(RUN_ID)"; exit 1; }
+	mkdir -p dist
+	tar -czf dist/bundle-$(RUN_ID).tar.gz -C models $(RUN_ID)
+	@echo "dist/bundle-$(RUN_ID).tar.gz -- attach with: gh release create <tag> dist/bundle-$(RUN_ID).tar.gz"
 
 # run every pre-commit hook without committing
 lint:

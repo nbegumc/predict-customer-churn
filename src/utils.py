@@ -16,7 +16,12 @@ import numpy as np
 
 from . import config as C
 
-LOG_FILE = C.ROOT / "experiments.csv"
+# WORK, not ROOT: everything a run writes goes to the same place. Identical
+# locally (WORK defaults to ROOT) but it fixes two things — CHURN_WORK_DIR now
+# actually isolates a fixture run from the real log, and on Kaggle ROOT is the
+# read-only /kaggle/input mount that src/ was imported from, so this would have
+# raised there the first time anyone logged a run from a kernel.
+LOG_FILE = C.WORK / "experiments.csv"
 # `folds` is the fold fingerprint from cv.fold_fingerprint — it is what lets
 # blend.py refuse to average OOF files produced under different fold schemes.
 LOG_FIELDS = [

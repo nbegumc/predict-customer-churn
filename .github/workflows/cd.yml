@@ -1,0 +1,91 @@
+# Publishes the shippable image when a Release is published.
+#
+# Why a Release and not CI: the model bundle is ~30MB, against a 1MB
+# check-added-large-files hook, and models/ is gitignored -- so the real model
+# can never be in the repository. Attaching it to a Release makes it versioned,
+# downloadable and reproducible from a tag, which is the job Azure ML's Model
+# Registry does. CI proves the Dockerfile works using a fixture model; this
+# proves the real one does.
+#
+#   make release-bundle RUN_ID=1024_141318_lgbm
+#   gh release create v1.0.0 dist/bundle-1024_141318_lgbm.tar.gz --notes "..."
+name: CD
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Release tag whose bundle asset to publish
+        required: true
+
+permissions:
+  contents: read
+  packages: write
+
+jobs:
+  publish:
+    name: publish to ghcr
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Fetch the model bundle from the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ github.event.release.tag_name || inputs.tag }}
+        run: |
+          gh release download "$TAG" --pattern 'bundle-*.tar.gz' --dir /tmp
+          mkdir -p models
+          tar -xzf /tmp/bundle-*.tar.gz -C models
+          run_id=$(ls models | head -1)
+          test -f "models/$run_id/manifest.json" || { echo "no manifest in the bundle"; exit 1; }
+          echo "MODEL_RUN_ID=$run_id" >> "$GITHUB_ENV"
+          # Surface what is being shipped in the job log and in the image labels.
+          python -c "import json;m=json.load(open('models/$run_id/manifest.json'));print('cv_score',m['cv_score'],'fingerprint',m['fold_fingerprint'])"
+          echo "CV_SCORE=$(python -c "import json;print(json.load(open('models/$run_id/manifest.json'))['cv_score'])")" >> "$GITHUB_ENV"
+
+      - uses: docker/login-action@v4
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          # No secret to configure: GITHUB_TOKEN can write this repo's packages.
+          password: ${{ github.token }}
+
+      - name: Build and push
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          push: true
+          build-args: MODEL_RUN_ID=${{ env.MODEL_RUN_ID }}
+          tags: |
+            ghcr.io/${{ github.repository }}:${{ github.event.release.tag_name || inputs.tag }}
+            ghcr.io/${{ github.repository }}:latest
+          labels: |
+            org.opencontainers.image.revision=${{ github.sha }}
+            ai.model.run_id=${{ env.MODEL_RUN_ID }}
+            ai.model.cv_score=${{ env.CV_SCORE }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Smoke the published image
+        env:
+          TAG: ${{ github.event.release.tag_name || inputs.tag }}
+        run: |
+          # Pull it back rather than reusing the local build, so this tests what
+          # a user would actually get.
+          docker run -d --name churn-cd -p 8000:8000 "ghcr.io/${{ github.repository }}:$TAG"
+          for i in $(seq 1 30); do
+            curl -sf localhost:8000/health >/dev/null && break
+            sleep 2
+          done
+          curl -sf localhost:8000/ready | tee /tmp/ready.json
+          grep -q '"status":"ready"' /tmp/ready.json
+          curl -sf -X POST localhost:8000/predict \
+            -H 'Content-Type: application/json' \
+            -d @tests/fixtures/example_request.json | grep -q churn_probability
+
+      - name: Container logs on failure
+        if: failure()
+        run: docker logs churn-cd || true

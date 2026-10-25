@@ -71,8 +71,17 @@ if ON_KAGGLE:
     RAW = Path("/kaggle/input") / COMPETITION
     WORK = Path("/kaggle/working")
 else:
-    RAW = ROOT / "data" / "raw"
-    WORK = ROOT
+    # CHURN_RAW_DIR points training at a different copy of the data without
+    # touching data/raw, which CLAUDE.md declares immutable. CI uses it to train
+    # a throwaway model on tests/fixtures/ so it can build and smoke-test the
+    # image without the 77MB dataset, which is gitignored and never in a clone.
+    RAW = Path(os.getenv("CHURN_RAW_DIR") or ROOT / "data" / "raw")
+    # CHURN_WORK_DIR redirects everything a run *writes* — experiments.csv,
+    # models/, submissions/. Without it, training on fixture data appends a
+    # meaningless row to the real experiment log. CI deliberately leaves this
+    # unset, because the Dockerfile copies models/<run_id> relative to the
+    # build context and the bundle therefore has to land under the repo root.
+    WORK = Path(os.getenv("CHURN_WORK_DIR") or ROOT)
 
 INTERIM = WORK / "data" / "interim"
 PROCESSED = WORK / "data" / "processed"
