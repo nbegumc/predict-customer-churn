@@ -25,6 +25,7 @@ from .models.lgbm import LGBMModel
 from .models.linear import LinearModel
 from .models.mlp import MLPModel
 from .utils import (
+    combine_members,
     git_sha,
     log_experiment,
     mlflow_run,
@@ -139,7 +140,7 @@ def run(
         # NaN marks "never validated" — time-based folds do not cover the earliest
         # rows, and those must be masked out rather than silently scored as zero.
         oof = np.full(len(train), np.nan)
-        test_pred = np.zeros(len(test))
+        test_preds: list[np.ndarray] = []
         importances = []
         best_iters: list[int] = []
         fold_scores: list[float] = []
@@ -158,7 +159,7 @@ def run(
                     X_tr, y[tr_pos], X_va, y[va_pos], features=feats
                 )
             oof[va_pos] = inverse(fitted.predict(X_va))
-            test_pred += inverse(fitted.predict(X_te)) / len(folds)
+            test_preds.append(inverse(fitted.predict(X_te)))
             if hasattr(fitted, "importance"):
                 importances.append(fitted.importance())
             # Same hasattr idiom as importance above. Until now every fitted model
@@ -172,6 +173,10 @@ def run(
             ml.log_metric(f"fold_{C.METRIC}", fold_scores[-1], step=fold)
             if best_iters:
                 ml.log_metric("fold_best_iteration", best_iters[-1], step=fold)
+
+        # The same function serving uses, so test_*.npy is by construction what
+        # the fold_average strategy returns.
+        test_pred = combine_members(test_preds, [1.0 / len(folds)] * len(folds))
 
         scored = ~np.isnan(oof)
         cv_score = CV.score(y_raw[scored], oof[scored])

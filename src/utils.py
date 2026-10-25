@@ -220,6 +220,27 @@ def save_oof(
         )
 
 
+def combine_members(preds, weights) -> np.ndarray:
+    """The one definition of how member predictions become a single score.
+
+    `train.py` uses it to build the saved test_*.npy and `src/predict.py` uses
+    it at serving time, so the two cannot drift apart — which is what keeps the
+    parity test bitwise.
+
+    Accumulates in member order from zeros. With uniform weights it divides
+    each member by n rather than multiplying by 1/n: 1/5 has no exact binary
+    representation, so `p / 5` and `0.2 * p` differ in the last bit — on 79,690
+    of the 254,655 real test rows — and the champion's saved arrays were built
+    by division.
+    """
+    preds, weights = list(preds), list(weights)
+    out = np.zeros_like(np.asarray(preds[0], dtype=np.float64))
+    uniform = len(set(weights)) == 1
+    for p, w in zip(preds, weights):
+        out += p / len(preds) if uniform else w * p
+    return out
+
+
 def savefig(fig, name: str, dpi: int = 150) -> None:
     """Save every chart as you make it — visualisation is worth points."""
     path = C.FIGURES / f"{name}.png"
