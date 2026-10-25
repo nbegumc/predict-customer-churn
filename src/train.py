@@ -40,6 +40,8 @@ MODELS = {
     "linear": LinearModel,
     "mlp": MLPModel,
 }
+# The wrappers whose constructors take num_boost_round and early_stopping.
+BOOSTERS = {"lgbm", "catboost"}
 
 
 def _write_manifest(
@@ -102,6 +104,12 @@ def run(
     rounds: int | None = None,
     early_stopping: int | None = None,
 ):
+    # Checked before anything loads: the linear and mlp wrappers take no round
+    # count, so without this a typo costs a 594k-row load and a failed fold 0.
+    if (rounds is not None or early_stopping is not None) and model not in BOOSTERS:
+        raise ValueError(
+            f"--rounds / --no-early-stopping apply to {sorted(BOOSTERS)} only, not {model!r}"
+        )
     seed_everything()
     # Allocated before the fold loop, because each fold's model needs somewhere
     # to go. Side effect: the id's timestamp is now run-start, not run-end.
