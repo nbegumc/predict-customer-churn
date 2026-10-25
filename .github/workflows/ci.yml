@@ -29,10 +29,14 @@ jobs:
         with:
           path: ~/.cache/pre-commit
           key: pre-commit-${{ hashFiles('.pre-commit-config.yaml') }}
-      - run: uv sync --frozen
+      # Only the dev group: pre-commit builds its own environment for every
+      # hook, so installing the training, serving and notebook stacks here would
+      # buy nothing. 24 packages instead of the full default set.
+      - run: uv sync --frozen --only-group dev
       # The same gate the repo already used locally -- `make lint`. It also runs
       # the uv-lock hook, so a pyproject.toml edited without re-locking fails here.
-      - run: uv run pre-commit run --all-files --show-diff-on-failure
+      # --no-sync, or `uv run` would first re-sync the default groups.
+      - run: uv run --no-sync pre-commit run --all-files --show-diff-on-failure
 
   test:
     name: test
