@@ -46,7 +46,7 @@ from . import config as C
 from .data import normalise_columns
 from .features import DERIVED, add_telco_features
 from .models.lgbm import LGBMModel
-from .utils import reduce_memory
+from .utils import combine_members, reduce_memory
 
 # Loading a bundle reads ~30MB off disk and parses five boosters, so it happens
 # once per process rather than once per request.
@@ -97,6 +97,16 @@ class Bundle:
         if probability >= high:
             return "high"
         return "medium" if probability >= medium else "low"
+
+
+def _first_divergence(a: list[str], b: list[str]) -> int:
+    """Index of the first differing name; the shorter length if one is a prefix.
+
+    Without the default, `next()` raises StopIteration when the lists differ
+    only in length, which replaced the ValueError it was building with an
+    empty "StopIteration: " — exactly the failure it was meant to explain.
+    """
+    return next((i for i, (x, y) in enumerate(zip(a, b)) if x != y), min(len(a), len(b)))
 
 
 def bundle_path(run_id_or_path: str | Path) -> Path:
@@ -155,7 +165,7 @@ def load_bundle(run_id_or_path: str | Path, strategy: str | None = None) -> Bund
             f"bundle {path.name} is inconsistent: manifest lists {len(manifest['features'])} "
             f"features but the booster was trained on {len(trained_on)}. "
             f"First divergence at position "
-            f"{next(i for i, (a, b) in enumerate(zip(trained_on, manifest['features'])) if a != b)}."
+            f"{_first_divergence(trained_on, manifest['features'])}."
         )
 
     bundle = Bundle(manifest=manifest, members=members, strategy=strategy)
@@ -205,18 +215,7 @@ def predict_raw(bundle: Bundle, df_raw: pd.DataFrame) -> np.ndarray:
     """Churn probability per row, in the order the rows came in."""
     X = build_serving_frame(bundle, df_raw)
     preds = [model.predict(X) for model, _ in bundle.members]
-    weights = [w for _, w in bundle.members]
-
-    if len(preds) > 1 and len(set(weights)) == 1:
-        # Uniform weights are the fold-average case, and `train.py` builds its
-        # saved test predictions as `test_pred += p_k / len(folds)`. Dividing by
-        # n is NOT bitwise equal to multiplying by 1/n, because 1/5 has no exact
-        # binary representation — measured at 4.4e-16 on 79,690 of 254,655 real
-        # rows. Twelve orders of magnitude below anything that matters, but
-        # dividing the same way makes serving reproduce the leaderboard artifact
-        # exactly, which keeps the parity test maximally sensitive.
-        return sum(p / len(preds) for p in preds)
-    return sum(w * p for w, p in zip(weights, preds))
+    return combine_members(preds, [w for _, w in bundle.members])
 
 
 def clear_cache() -> None:

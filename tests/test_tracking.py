@@ -181,3 +181,50 @@ def test_git_sha_is_recorded_and_marks_a_dirty_tree():
     sha = U.git_sha()
     assert sha != "unknown"
     assert sha.split("-")[0].isalnum()
+
+
+def test_an_mlflow_failure_mid_run_still_writes_the_csv_row(isolated_run, monkeypatch):
+    """The second sink must not be able to erase the first.
+
+    Before the fix, an artifact upload failing after the OOF arrays were saved
+    raised out of run() and the experiments.csv row was never written.
+    """
+    import mlflow
+
+    def broken(*_args, **_kwargs):
+        raise OSError("simulated: disk full while uploading an artifact")
+
+    monkeypatch.setattr(mlflow, "log_artifact", broken)
+    monkeypatch.setattr(mlflow, "log_artifacts", broken)
+    run_id, _ = T.run(model="lgbm", notes="mlflow broken mid-run", rounds=20, early_stopping=10)
+
+    log = pd.read_csv(U.LOG_FILE).set_index("run_id")
+    assert run_id in log.index
+
+
+def test_mlflow_unable_to_start_falls_back_to_untracked(isolated_run, monkeypatch):
+    """A locked or unreachable store means no tracking, not no training."""
+    import mlflow
+
+    def locked(*_args, **_kwargs):
+        raise RuntimeError("simulated: database is locked")
+
+    monkeypatch.setattr(mlflow, "start_run", locked)
+    run_id, _ = T.run(model="lgbm", notes="mlflow cannot start", rounds=20, early_stopping=10)
+    assert run_id in pd.read_csv(U.LOG_FILE)["run_id"].tolist()
+
+
+def test_a_training_error_still_propagates_and_marks_the_run_failed(isolated_run, monkeypatch):
+    """Guarding tracking must not swallow real errors."""
+    import mlflow
+
+    def explode(*_args, **_kwargs):
+        raise RuntimeError("simulated training failure")
+
+    monkeypatch.setattr(T, "build_features", explode)
+    with pytest.raises(RuntimeError, match="simulated training failure"):
+        T.run(model="lgbm", notes="should fail", rounds=20, early_stopping=10)
+
+    mlflow.set_tracking_uri(C.MLFLOW_TRACKING_URI)
+    runs = mlflow.search_runs(experiment_names=["test-experiment"])
+    assert (runs["status"] == "FAILED").any()

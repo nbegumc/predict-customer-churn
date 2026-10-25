@@ -193,3 +193,19 @@ def test_champion_bundle_reproduces_the_retained_predictions():
     ref = np.load(C.EXPERIMENTS / "test_0904_202729_lgbm.npy")
     new = np.load(C.EXPERIMENTS / f"test_{repack[-1]}.npy")
     assert np.array_equal(ref, new)
+
+
+@pytest.mark.parametrize("model", ["linear", "mlp"])
+def test_round_flags_are_rejected_for_non_boosters_before_loading(model, monkeypatch):
+    """`--rounds` used to reach LinearModel/MLPModel and raise TypeError in fold 0,
+    after a 594k-row load. It must fail first, and loudly."""
+    from src import train as T
+
+    def must_not_load():
+        raise AssertionError("training data was loaded before the flags were validated")
+
+    monkeypatch.setattr(T, "load", must_not_load)
+    with pytest.raises(ValueError, match="boosters|catboost"):
+        T.run(model=model, rounds=10)
+    with pytest.raises(ValueError):
+        T.run(model=model, early_stopping=0)
