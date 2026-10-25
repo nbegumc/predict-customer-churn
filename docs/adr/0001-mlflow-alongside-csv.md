@@ -24,7 +24,7 @@ the file does not exist, so an eighth field would append 8-value rows under a
 The link runs the other way — the repo's `run_id` becomes an MLflow tag, so a
 run and a CSV row are joinable by eye and by query.
 
-Backend is SQLite rather than the default `./mlruns` file store, because the
+Backend is SQLite (`mlruns/mlflow.db`) rather than the default file store, because the
 model registry needs a database-backed store and the file store cannot register
 models. A `.db` file in the repo is still zero infrastructure.
 
@@ -56,5 +56,17 @@ Azure ML's own SDK would have been a lock-in; MLflow against Azure ML is not.
   `from src.train import run` inside a Kaggle kernel, and
   `kernel-metadata.json` sets `enable_internet: false`. Hence the `_NoMlflow`
   shim, which exists for that one reason and is tested.
+- **A secondary sink must not be able to break the primary one.** The first
+  version let a runtime MLflow error -- a locked SQLite file, a full disk, a
+  failed artifact upload -- abort `run()` after the arrays were saved but before
+  `log_experiment` wrote the CSV row. Now a store that cannot start a run means
+  untracked training, and every later call goes through `_SafeMlflow`, which
+  reports the failure and carries on. Only training errors propagate.
+- **The store is one directory.** The database sits beside its artifacts in
+  `mlruns/`, and docker-compose mounts that directory into the MLflow container
+  *at the same absolute path*, because MLflow records artifact locations as
+  absolute host paths. The first compose file pointed the server at a different
+  database entirely, so the UI never showed a host run. Its host port is 5001:
+  macOS AirPlay Receiver holds 5000.
 - **Revisit when:** more than one person logs runs, at which point SQLite on a
   bind mount stops being adequate and the server needs Postgres.

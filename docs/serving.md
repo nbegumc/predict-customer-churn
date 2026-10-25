@@ -7,8 +7,11 @@ make serve                 # host, with reload -- http://localhost:8000/docs
 make up                    # api + mlflow + prometheus in docker
 ```
 
-`make up` needs `.env` (`cp .env.example .env`) naming a bundle in `models/`.
-Without a bundle, train one:
+Both read `MODEL_RUN_ID` from `.env` (`cp .env.example .env`). When `models/`
+holds more than one bundle the API **refuses to guess** which to serve: `/ready`
+returns 503 naming the candidates, and `/health` stays up. It used to pick the
+newest run id, which once meant serving a fixed-rounds experiment instead of the
+champion. Without a bundle at all, train one:
 
 ```bash
 uv run python -m src.train --model lgbm --full-refit --notes "serving bundle"
@@ -21,15 +24,22 @@ lower-case. The original Kaggle casing (`MonthlyCharges`, `Contract`) is
 accepted as an alias and gives an identical answer.
 
 ```json
-{"churn_probability": 0.7097, "risk_band": "medium",
+{"churn_probability": 0.7097, "risk_band": "high",
  "run_id": "1024_141318_lgbm", "strategy": "fold_average"}
 ```
 
 It returns a **probability, not a decision**. The model was selected on ROC-AUC,
 a ranking metric, and no operating threshold was ever chosen. `risk_band` says
-where the customer falls in the scored population — `high` is roughly the top
-10%, which `notebooks/99_final_writeup.ipynb` measured at 3.7× the base churn
-rate. Choosing a cutoff is a retention-budget decision, not a model property.
+where the customer falls in the scored population — `high` is the top 10%,
+which `notebooks/99_final_writeup.ipynb` measured at 3.7× the base churn rate.
+Choosing a cutoff is a retention-budget decision, not a model property.
+
+The thresholds are quantiles of what each strategy *actually serves*, pinned in
+the bundle per strategy. They were first taken from OOF predictions, which come
+from one fold model per row and are more dispersed than the five-model mean
+served here — so only 9.18% of customers reached `high`. The customer above
+scored 0.7097 and was labelled `medium`; on the served distribution they are in
+the top 10%.
 
 | endpoint | |
 |---|---|

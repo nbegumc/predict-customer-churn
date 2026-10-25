@@ -45,8 +45,14 @@ Holding that line turned up one more thing. `train.py` accumulates
 `w = 0.2`. `1/5` has no exact binary representation, so `p/5 != 0.2*p`, and the
 two diverged on **79,690 of 254,655 rows at max |Δ| 4.4e-16**. Twelve orders of
 magnitude below anything that matters — and exactly the kind of difference that
-makes you weaken an assertion instead of understanding it. `predict_raw` now
-divides the same way when weights are uniform.
+makes you weaken an assertion instead of understanding it.
+
+The first fix was a special case in `predict_raw` that divided when the weights
+happened to be uniform, mimicking `train.py`. Review pointed out that this only
+moved the problem: two summation paths, kept in step by hand, so any change to
+`train.py`'s accumulation would break parity again silently. Both now call one
+function, `utils.combine_members`, and an isolated retrain through it still
+reproduces the September champion's arrays bitwise.
 
 ## Azure equivalent
 
