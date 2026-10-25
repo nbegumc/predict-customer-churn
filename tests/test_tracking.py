@@ -228,3 +228,27 @@ def test_a_training_error_still_propagates_and_marks_the_run_failed(isolated_run
     mlflow.set_tracking_uri(C.MLFLOW_TRACKING_URI)
     runs = mlflow.search_runs(experiment_names=["test-experiment"])
     assert (runs["status"] == "FAILED").any()
+
+
+def test_a_test_run_writes_no_artifacts_into_the_repos_mlruns(isolated_run):
+    """Regression: the fixtures redirected the tracking *database* to a tmp dir,
+    but MLflow put new experiments' artifacts in ./mlruns relative to the
+    working directory -- the repo. ~1,100 test runs and 226MB accumulated
+    there. Artifacts now follow the database."""
+    repo_mlruns = C.ROOT / "mlruns"
+    before = set(repo_mlruns.glob("*/*")) if repo_mlruns.exists() else set()
+
+    run_id, _ = T.run(model="lgbm", notes="artifact isolation", rounds=20, early_stopping=10)
+
+    after = set(repo_mlruns.glob("*/*")) if repo_mlruns.exists() else set()
+    assert after == before, f"{len(after - before)} new entries leaked into {repo_mlruns}"
+    # ...and they landed beside the tmp database instead.
+    assert any(isolated_run.glob(f"{C.MLFLOW_EXPERIMENT}/*/artifacts/oof_{run_id}.npy"))
+
+
+def test_artifact_root_follows_the_tracking_uri(monkeypatch, tmp_path):
+    monkeypatch.setattr(C, "MLFLOW_TRACKING_URI", f"sqlite:///{tmp_path / 'x.db'}")
+    assert U.artifact_root() == str(tmp_path.resolve() / C.MLFLOW_EXPERIMENT)
+    # A tracking server (or Azure ML) chooses its own artifact store.
+    monkeypatch.setattr(C, "MLFLOW_TRACKING_URI", "http://localhost:5001")
+    assert U.artifact_root() is None
