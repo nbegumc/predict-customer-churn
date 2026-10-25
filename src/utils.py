@@ -98,16 +98,48 @@ class _NoMlflow:
         return lambda *_a, **_k: None
 
 
+class _SafeMlflow:
+    """Forwards to mlflow, turning any tracking failure into a printed warning.
+
+    MLflow is the second sink. Left unguarded, a locked SQLite file, a full disk
+    or an unreachable server would raise mid-run — after the OOF arrays,
+    submission and bundle were saved, but before `log_experiment` wrote the
+    experiments.csv row. The secondary record would erase the primary one.
+    """
+
+    def __init__(self, module):
+        self._mlflow = module
+
+    def __getattr__(self, name):
+        attr = getattr(self._mlflow, name)
+        if not callable(attr):
+            return attr
+
+        def guarded(*args, **kwargs):
+            try:
+                return attr(*args, **kwargs)
+            except Exception as exc:
+                print(f"(mlflow.{name} failed; training continues: {type(exc).__name__}: {exc})")
+                return None
+
+        return guarded
+
+
 @contextmanager
 def mlflow_run(run_id: str, model: str, notes: str = ""):
     """Mirror one training run into MLflow, yielding the module (or a shim).
 
-    This is a *second* sink, not a replacement. `experiments.csv` stays the file
-    `blend.py` reads to check fold fingerprints, and `log_experiment` below is
-    untouched — note that it writes the CSV header only when the file is absent,
-    so adding a column there would append 8-value rows under a 7-column header.
-    The link runs the other way: the repo's `run_id` is an MLflow tag, so a run
-    and a CSV row are joinable by eye and by query.
+    This is a *second* sink, not a replacement, and it is built so it cannot
+    break the first. `experiments.csv` stays the file `blend.py` reads to check
+    fold fingerprints, and `log_experiment` below is untouched — note that it
+    writes the CSV header only when the file is absent, so adding a column there
+    would append 8-value rows under a 7-column header. The link runs the other
+    way: the repo's `run_id` is an MLflow tag, so a run and a CSV row are
+    joinable by eye and by query.
+
+    If MLflow cannot start a run, training continues untracked; if any later
+    call fails, `_SafeMlflow` reports it and carries on. Only an error in
+    training itself propagates, and it marks the MLflow run FAILED on the way.
 
     Pointing MLFLOW_TRACKING_URI at an Azure ML workspace is the entire
     migration — Azure ML speaks MLflow natively and this code does not change.
@@ -118,22 +150,34 @@ def mlflow_run(run_id: str, model: str, notes: str = ""):
         yield _NoMlflow()
         return
 
-    mlflow.set_tracking_uri(C.MLFLOW_TRACKING_URI)
-    mlflow.set_experiment(C.MLFLOW_EXPERIMENT)
-    with mlflow.start_run(run_name=run_id):
-        mlflow.set_tags(
-            {
-                "run_id": run_id,
-                "model": model,
-                "competition": C.COMPETITION,
-                "cv_scheme": C.CV_SCHEME,
-                "n_folds": C.N_FOLDS,
-                "seed": C.SEED,
-                "git_sha": git_sha(),
-                "notes": notes,
-            }
-        )
-        yield mlflow
+    try:
+        mlflow.set_tracking_uri(C.MLFLOW_TRACKING_URI)
+        mlflow.set_experiment(C.MLFLOW_EXPERIMENT)
+        mlflow.start_run(run_name=run_id)
+    except Exception as exc:
+        print(f"(MLflow unavailable; training continues untracked: {type(exc).__name__}: {exc})")
+        yield _NoMlflow()
+        return
+
+    ml = _SafeMlflow(mlflow)
+    ml.set_tags(
+        {
+            "run_id": run_id,
+            "model": model,
+            "competition": C.COMPETITION,
+            "cv_scheme": C.CV_SCHEME,
+            "n_folds": C.N_FOLDS,
+            "seed": C.SEED,
+            "git_sha": git_sha(),
+            "notes": notes,
+        }
+    )
+    status = "FAILED"
+    try:
+        yield ml
+        status = "FINISHED"
+    finally:
+        ml.end_run(status=status)
 
 
 def git_sha() -> str:
