@@ -113,8 +113,10 @@ def report(since: str | None = None, open_browser: bool = False) -> dict:
         Dataset.from_pandas(reference[shared], data_definition=definition),
     )
 
-    C.FIGURES.parent.mkdir(parents=True, exist_ok=True)
-    out = C.ROOT / "reports" / f"drift_{datetime.now().astimezone():%Y-%m-%d_%H%M}.html"
+    # C.REPORTS, read at call time -- not ROOT/"reports", which always meant the
+    # real repo and so ignored CHURN_WORK_DIR and every test's tmp redirection.
+    C.REPORTS.mkdir(parents=True, exist_ok=True)
+    out = C.REPORTS / f"drift_{datetime.now().astimezone():%Y-%m-%d_%H%M}.html"
     result.save_html(str(out))
 
     summary = {

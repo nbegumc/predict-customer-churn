@@ -310,3 +310,26 @@ def test_openapi_documents_the_contract(client):
     assert "/predict/batch" in spec["paths"]
     schema = spec["components"]["schemas"]["Customer"]["properties"]
     assert set(schema["contract"]["enum"]) == {"Month-to-month", "One year", "Two year"}
+
+
+def _real(path_parts):
+    """A path in the real working tree, independent of conftest's redirects."""
+    return C.ROOT.joinpath(*path_parts)
+
+
+def _fingerprint(path):
+    return (path.stat().st_size, path.stat().st_mtime_ns) if path.exists() else None
+
+
+def test_scoring_does_not_write_into_the_real_prediction_log(client):
+    """Regression: this fixture never redirected PRED_LOG, so every scored test
+    request was appended to the real logs/predictions.jsonl -- ~100 fixture rows
+    that `make drift` then read as live traffic."""
+    real_log = _real(("logs", "predictions.jsonl"))
+    before = _fingerprint(real_log)
+
+    client.post("/predict", json=EXAMPLE)
+    client.post("/predict/batch", json={"customers": [EXAMPLE] * 3})
+
+    assert _fingerprint(real_log) == before
+    assert len(C.PRED_LOG.read_text().splitlines()) == 4  # they went to the tmp log

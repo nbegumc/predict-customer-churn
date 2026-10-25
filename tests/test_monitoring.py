@@ -9,6 +9,7 @@ skewed slice.
 from __future__ import annotations
 
 import json
+from pathlib import Path
 
 import pandas as pd
 import pytest
@@ -193,3 +194,20 @@ def test_a_drift_report_on_a_fresh_store_keeps_its_artifacts_beside_it(tmp_path,
 
     assert after == before
     assert list((db_dir / "drift-isolation").glob("*/artifacts/report.html"))
+
+
+def test_a_drift_report_is_not_written_into_the_real_reports_dir(client, synthetic_raw):
+    """Regression: monitor.report wrote to ROOT/"reports" -- always the real
+    repo -- so every drift test left an HTML file in reports/ (19 of them)."""
+    real_reports = C.ROOT / "reports"
+    before = set(real_reports.glob("drift_*.html"))
+
+    M.build_reference(n_rows=200)
+    rows = synthetic_raw.rename(columns={c: c.lower() for c in synthetic_raw.columns})
+    with TestClient(app) as c:
+        for row in rows.drop(columns=["churn", "id"]).head(30).to_dict("records"):
+            c.post("/predict", json=row)
+    summary = M.report()
+
+    assert set(real_reports.glob("drift_*.html")) == before
+    assert C.REPORTS in Path(summary["report"]).parents
