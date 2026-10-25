@@ -1,0 +1,102 @@
+# Runs on every push and pull request. Needs no data, no Kaggle credentials and
+# no secrets: data/raw/ is gitignored and absent from any clone, so the
+# `realdata` tests skip and everything else runs on tests/fixtures/.
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  lint:
+    name: lint
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      # Pinned to the exact release: astral-sh/setup-uv publishes major-version
+      # aliases only up to v7, so `@v10` does not resolve even though v10.3.2
+      # is the current release. An exact pin is better practice here anyway.
+      - uses: astral-sh/setup-uv@v10.3.2
+        with:
+          enable-cache: true
+      # pre-commit clones four hook repos on a cold run; cache them by config hash.
+      - uses: actions/cache@v6
+        with:
+          path: ~/.cache/pre-commit
+          key: pre-commit-${{ hashFiles('.pre-commit-config.yaml') }}
+      # Only the dev group: pre-commit builds its own environment for every
+      # hook, so installing the training, serving and notebook stacks here would
+      # buy nothing. 24 packages instead of the full default set.
+      - run: uv sync --frozen --only-group dev
+      # The same gate the repo already used locally -- `make lint`. It also runs
+      # the uv-lock hook, so a pyproject.toml edited without re-locking fails here.
+      # --no-sync, or `uv run` would first re-sync the default groups.
+      - run: uv run --no-sync pre-commit run --all-files --show-diff-on-failure
+
+  test:
+    name: test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: astral-sh/setup-uv@v10.3.2
+        with:
+          enable-cache: true
+      - run: uv sync --frozen
+      # Locks fold fingerprint 13feb807 without any data, so a change to
+      # CV_SCHEME or N_FOLDS turns this job red. That invariant used to be
+      # protected by a comment in CLAUDE.md.
+      - run: uv run pytest -q
+
+  docker:
+    name: build and smoke
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: astral-sh/setup-uv@v10.3.2
+        with:
+          enable-cache: true
+      - run: uv sync --frozen
+
+      # CI cannot build the shippable image: the real bundle is ~30MB against a
+      # 1MB pre-commit limit and models/ is gitignored, so no clone has one.
+      # Train a throwaway on the 200-row fixture instead -- same code path,
+      # under a second. CD builds the real image from a Release asset.
+      - name: Train a fixture bundle
+        run: |
+          uv run python scripts/make_fixture_data.py /tmp/ci-raw
+          CHURN_RAW_DIR=/tmp/ci-raw uv run python -m src.train \
+            --model lgbm --rounds 40 --notes "ci fixture bundle, not for scoring"
+          echo "MODEL_RUN_ID=$(ls -t models | head -1)" >> "$GITHUB_ENV"
+
+      - name: Build the image
+        run: docker build --build-arg MODEL_RUN_ID="$MODEL_RUN_ID" -t churn-api:ci .
+
+      - name: Smoke test it
+        run: |
+          docker run -d --name churn-ci -p 8000:8000 churn-api:ci
+          for i in $(seq 1 30); do
+            curl -sf localhost:8000/health >/dev/null && break
+            sleep 2
+          done
+          curl -sf localhost:8000/health
+          curl -sf localhost:8000/ready
+          # A real scoring call, so the test covers the feature path and not
+          # just that the process started.
+          curl -sf -X POST localhost:8000/predict \
+            -H 'Content-Type: application/json' \
+            -d @tests/fixtures/example_request.json | tee /tmp/out.json
+          grep -q churn_probability /tmp/out.json
+          # The divide-by-zero guard: add_telco_features has none of its own.
+          code=$(curl -s -o /dev/null -w '%{http_code}' -X POST localhost:8000/predict \
+            -H 'Content-Type: application/json' \
+            -d "$(sed 's/"tenure": 2/"tenure": 0/' tests/fixtures/example_request.json)")
+          test "$code" = "422" || { echo "expected 422 for tenure=0, got $code"; exit 1; }
+
+      - name: Container logs on failure
+        if: failure()
+        run: docker logs churn-ci || true

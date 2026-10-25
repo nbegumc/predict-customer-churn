@@ -69,3 +69,20 @@ def real_train() -> pd.DataFrame:
     if not C.TRAIN_FILE.exists():
         pytest.skip(f"{C.TRAIN_FILE} is absent (gitignored); run `make data` to fetch it")
     return pd.read_csv(C.TRAIN_FILE)
+
+
+def pytest_collection_modifyitems(config, items):
+    """Actually enforce the `realdata` marker.
+
+    `pyproject.toml` documents it as "needs data/raw, which is gitignored
+    (skipped when absent)", but nothing implemented the skipping — it only
+    worked when someone remembered `-m "not realdata"`. CI runs a bare
+    `pytest`, where `data/raw/` and `experiments/` are both absent from the
+    clone, so these failed instead of skipping.
+    """
+    if C.TRAIN_FILE.exists():
+        return
+    skip = pytest.mark.skip(reason=f"{C.TRAIN_FILE} absent — run `make data` for realdata tests")
+    for item in items:
+        if "realdata" in item.keywords:
+            item.add_marker(skip)

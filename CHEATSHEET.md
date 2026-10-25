@@ -102,7 +102,34 @@ uv run kaggle kernels push -p kaggle       # push the notebook itself
 
 First time only: `uv run kaggle datasets create -p kaggle/utils`.
 
-## 8. Hygiene
+## 8. Serve, monitor, version
+
+```bash
+make serve                 # API on :8000 with reload -- http://localhost:8000/docs
+make up                    # api + mlflow + prometheus in docker
+make down
+make mlflow-ui             # tracking UI on :5001 without docker (5000 is macOS AirPlay)
+
+make reference             # build the drift baseline from data/raw/train.csv (once)
+make drift                 # live traffic vs that baseline -> reports/drift_<date>.html
+make drift SINCE=7d
+```
+
+`experiments/` is versioned with DVC, because it is gitignored, 71MB, declared
+immutable in CLAUDE.md, and otherwise protected by nothing but this disk.
+**A training run writes new files into it, so `dvc status` goes dirty until:**
+
+```bash
+make dvc-save              # dvc add experiments && dvc push
+```
+
+`data/raw/` is deliberately *not* DVC-tracked -- `make data` re-downloads it
+from Kaggle, so versioning it would duplicate 111MB to guard something one
+command restores. Model bundles are not either: they ship as GitHub Release
+assets (`make release-bundle RUN_ID=...`), and two channels for one artifact is
+how they diverge.
+
+## 9. Hygiene
 
 ```bash
 make lint          # run every pre-commit hook without committing

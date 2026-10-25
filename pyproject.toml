@@ -75,3 +75,14 @@ line-length = 100
 
 [tool.ruff.lint]
 ignore = ["E501", "E741"]   # long lines, ambiguous names like `l`
+
+[tool.ruff.lint.per-file-ignores]
+# BLE001 (blind except) is right in general and wrong for one pattern: code that
+# isolates a *secondary* sink -- MLflow tracking, the LB mirror -- whose backends
+# can raise anything (sqlalchemy, requests, OSError, MlflowException) and must
+# never take training or a recorded score down with them. Scoped to the files
+# that do that, so the rule stays on everywhere else.
+"src/utils.py" = ["BLE001"]
+"src/log_lb.py" = ["BLE001"]
+"src/api.py" = ["BLE001"]   # a failed model load is reported via /ready, not raised
+"src/monitor.py" = ["BLE001"]   # a drift report must not fail on its MLflow mirror

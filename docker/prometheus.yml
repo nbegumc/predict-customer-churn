@@ -1,0 +1,13 @@
+# Scrapes the API's /metrics. Deliberately no Grafana in the stack: five
+# metrics are readable in Prometheus' own expression browser at :9090, and a
+# dashboard is a screenshot rather than a capability. Adding one later is a
+# single compose service.
+global:
+  scrape_interval: 15s
+  evaluation_interval: 15s
+
+scrape_configs:
+  - job_name: churn-api
+    metrics_path: /metrics/
+    static_configs:
+      - targets: ["api:8000"]
