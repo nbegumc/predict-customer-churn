@@ -101,6 +101,19 @@ MLRUNS = WORK / "mlruns"
 MLFLOW_TRACKING_URI = os.getenv("MLFLOW_TRACKING_URI", f"sqlite:///{MLRUNS / 'mlflow.db'}")
 MLFLOW_EXPERIMENT = os.getenv("MLFLOW_EXPERIMENT", COMPETITION)
 
+# Risk bands for the API, as probability thresholds. These are a *business*
+# decision, not a model property: they come from the lift curve in
+# notebooks/99_final_writeup.ipynb, where the top 10% of the ranked call list
+# runs at 3.7x the base rate and the top 30% reaches 82% of churners at 2.7x.
+# Measured on what is actually served -- the champion's fold_average scores
+# over the 254,655 test rows: p90 = 0.694, p70 = 0.295, which put exactly 10.00%
+# and 30.01% of customers in the high and medium-or-high bands. An earlier
+# version used OOF quantiles (0.711 / 0.311); OOF is one fold model per row and
+# more dispersed than the five-model mean, so only 9.18% reached "high".
+# A bundle carrying its own score_quantiles overrides these.
+RISK_BAND_HIGH = 0.694
+RISK_BAND_MEDIUM = 0.295
+
 # One JSON line per served prediction. The input src.monitor reads to build a
 # drift report; append-only, and never on the request's critical path.
 PRED_LOG = WORK / "logs" / "predictions.jsonl"

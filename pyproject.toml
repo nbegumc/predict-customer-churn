@@ -84,3 +84,4 @@ ignore = ["E501", "E741"]   # long lines, ambiguous names like `l`
 # that do that, so the rule stays on everywhere else.
 "src/utils.py" = ["BLE001"]
 "src/log_lb.py" = ["BLE001"]
+"src/api.py" = ["BLE001"]   # a failed model load is reported via /ready, not raised
