@@ -87,11 +87,12 @@ class Bundle:
         list worked from the top down, and the top 10% runs at 3.7x the base
         rate while the top 30% reaches 82% of churners.
 
-        Prefers the quantiles pinned into the bundle at training time; falls
-        back to the thresholds in config.py for bundles written before the
-        manifest carried them.
+        Prefers the quantiles pinned into the bundle at training time for this
+        strategy -- measured on the scores that strategy actually serves -- and
+        falls back to the thresholds in config.py for bundles written before
+        the manifest carried them.
         """
-        q = self.manifest.get("score_quantiles") or {}
+        q = (self.manifest.get("score_quantiles") or {}).get(self.strategy) or {}
         high = float(q.get("0.9", C.RISK_BAND_HIGH))
         medium = float(q.get("0.7", C.RISK_BAND_MEDIUM))
         if probability >= high:

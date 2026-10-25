@@ -24,6 +24,7 @@ Conflating "out of domain" with "out of range" is the standard mistake here.
 from __future__ import annotations
 
 import os
+import threading
 from contextlib import asynccontextmanager
 from typing import Literal
 
@@ -122,6 +123,9 @@ class BatchResponse(BaseModel):
 
 
 STATE: dict = {"bundle": None, "error": None, "out_of_range": {}}
+# FastAPI runs sync `def` endpoints in a threadpool, so the out-of-range
+# counter is updated concurrently and needs a lock around its read-modify-write.
+_STATE_LOCK = threading.Lock()
 
 
 def _reset_state() -> None:
@@ -174,12 +178,22 @@ async def lifespan(_app: FastAPI):
                     f"no bundle in {C.MODEL_DIR} and MODEL_RUN_ID is unset. "
                     "Train one with `uv run python -m src.train --full-refit`."
                 )
-            run_id = candidates[-1]
+            # Exactly one bundle (the container case) is unambiguous. More than
+            # one is not: picking the newest once served a fixed-rounds
+            # experiment instead of the champion, and %m%d run ids have no year,
+            # so "newest" is not even well defined across a new year.
+            if len(candidates) > 1:
+                raise LookupError(
+                    f"MODEL_RUN_ID is unset and {C.MODEL_DIR} holds {len(candidates)} bundles "
+                    f"({', '.join(candidates)}). Refusing to guess which one to serve; "
+                    "set MODEL_RUN_ID (see .env.example)."
+                )
+            run_id = candidates[0]
         bundle = P.load_bundle(run_id, strategy)
         _check_schema_matches_bundle(bundle)
         STATE["bundle"] = bundle
         print(f"loaded {bundle.run_id} [{bundle.strategy}, {len(bundle.members)} member(s)]")
-    except Exception as exc:  # noqa: BLE001 - reported via /ready instead
+    except Exception as exc:  # reported via /ready instead of crash-looping
         STATE["error"] = f"{type(exc).__name__}: {exc}"
         print(f"model load FAILED: {STATE['error']}")
     yield
@@ -209,7 +223,8 @@ def _count_out_of_range(frame: pd.DataFrame) -> None:
     for col, (lo, hi) in PLAUSIBLE.items():
         n = int(((frame[col] < lo) | (frame[col] > hi)).sum())
         if n:
-            STATE["out_of_range"][col] = STATE["out_of_range"].get(col, 0) + n
+            with _STATE_LOCK:
+                STATE["out_of_range"][col] = STATE["out_of_range"].get(col, 0) + n
 
 
 def _score(customers: list[Customer]) -> list[Prediction]:
@@ -254,7 +269,9 @@ def ready() -> dict:
 @app.get("/model", tags=["ops"])
 def model_info() -> dict:
     """The manifest, minus hyperparameters. What is being served, and from what."""
-    return _bundle().describe() | {"out_of_range_inputs": STATE["out_of_range"]}
+    with _STATE_LOCK:
+        counts = dict(STATE["out_of_range"])
+    return _bundle().describe() | {"out_of_range_inputs": counts}
 
 
 @app.post("/predict", response_model=Prediction, tags=["scoring"])
