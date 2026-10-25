@@ -5,6 +5,8 @@ them alone. Everything else in src/ reads from here, so nothing hardcodes a
 path and no notebook disagrees with a script.
 """
 
+import contextlib
+import os
 from pathlib import Path
 
 # --- competition -----------------------------------------------------------
@@ -82,5 +84,27 @@ TRAIN_FILE = RAW / "train.csv"
 TEST_FILE = RAW / "test.csv"
 SAMPLE_SUB_FILE = RAW / "sample_submission.csv"
 
-for _p in (INTERIM, PROCESSED, SUBMISSIONS, EXPERIMENTS, FIGURES):
-    _p.mkdir(parents=True, exist_ok=True)
+# --- model artifacts, tracking, serving ------------------------------------
+# A trained bundle is models/<run_id>/: one booster per fold plus a manifest
+# naming the feature order, the category lists and the blend weights. ~30MB,
+# so it is gitignored and distributed as a GitHub Release, not committed.
+MODEL_DIR = WORK / "models"
+
+# SQLite rather than MLflow's default ./mlruns file store, because the model
+# registry needs a database-backed store and a file in the repo is still zero
+# infrastructure. Point MLFLOW_TRACKING_URI at an Azure ML workspace and the
+# same logging code works unchanged — that env var is the whole migration.
+MLFLOW_TRACKING_URI = os.getenv("MLFLOW_TRACKING_URI", f"sqlite:///{WORK / 'mlflow.db'}")
+MLFLOW_EXPERIMENT = os.getenv("MLFLOW_EXPERIMENT", COMPETITION)
+
+# One JSON line per served prediction. The input src.monitor reads to build a
+# drift report; append-only, and never on the request's critical path.
+PRED_LOG = WORK / "logs" / "predictions.jsonl"
+
+# mkdir(2) takes the filesystem write lock before it checks for EEXIST, so on a
+# read-only mount this raises EROFS even when the directory is already there.
+# Every module in src/ imports this one, so an unguarded failure here would take
+# down the API too. Nothing on the inference path writes to these directories.
+for _p in (INTERIM, PROCESSED, SUBMISSIONS, EXPERIMENTS, FIGURES, MODEL_DIR, PRED_LOG.parent):
+    with contextlib.suppress(OSError):
+        _p.mkdir(parents=True, exist_ok=True)
