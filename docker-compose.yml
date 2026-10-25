@@ -2,7 +2,7 @@
 #
 #   cp .env.example .env     # set MODEL_RUN_ID to a bundle in models/
 #   docker compose up -d
-#   open http://localhost:8000   (API)  /  http://localhost:5000  (MLflow)
+#   open http://localhost:8000   (API)  /  http://localhost:5001  (MLflow; 5000 is macOS AirPlay)
 #
 # Local only, by choice. There is no deploy target here; docs/deployment.md
 # records what running this somewhere else would involve.
@@ -21,7 +21,6 @@ services:
       # fold_average is the default; full_refit is the other strategy in the
       # same bundle. Switching is a restart, not a rebuild.
       MODEL_STRATEGY: ${MODEL_STRATEGY:-fold_average}
-      MLFLOW_TRACKING_URI: http://mlflow:5000
     volumes:
       # The prediction log src.monitor reads. The only writable path the
       # container needs; everything else is immutable in the image.
@@ -36,17 +35,21 @@ services:
 
   mlflow:
     image: ghcr.io/mlflow/mlflow:v3.17.2
+    # The same store the host writes: src/config.py keeps the database at
+    # mlruns/mlflow.db beside the artifacts. MLflow records artifact locations
+    # as *absolute* host paths (/Users/.../mlruns/1/...), so the directory is
+    # mounted at that same absolute path -- mounting it anywhere else gives the
+    # UI runs whose artifacts it cannot open. Run compose from the repo root
+    # (`make up`), since ${PWD} is what makes the two paths agree.
     command: >
       mlflow server
       --host 0.0.0.0
       --port 5000
-      --backend-store-uri sqlite:////mlflow/mlflow.db
-      --default-artifact-root /mlflow/artifacts
+      --backend-store-uri sqlite:///${PWD}/mlruns/mlflow.db
+      --default-artifact-root ${PWD}/mlruns
     ports:
-      - "5000:5000"
+      # 5001 on the host: macOS AirPlay Receiver (ControlCenter) holds 5000.
+      - "5001:5000"
     volumes:
-      # Bind-mounted so a training run on the host and the UI in the container
-      # see the same store. SQLite has one writer here (the training run), so
-      # the usual bind-mount locking caveat does not bite.
-      - ./mlruns:/mlflow
+      - ./mlruns:${PWD}/mlruns
     restart: unless-stopped

@@ -279,3 +279,34 @@ def test_booster_rejects_a_frame_predict_raw_would_never_build(bundle, synthetic
     model = bundle.members[0][0]
     with pytest.raises(lgb.basic.LightGBMError):
         model.predict(X[list(X.columns)[::-1]])
+
+
+def test_feature_lists_differing_only_in_length_raise_valueerror(bundle):
+    """Regression: a manifest that is a prefix-extension of the booster's
+    feature list used to raise StopIteration from inside the error message."""
+    path = P.bundle_path(bundle.run_id)
+    manifest = json.loads((path / "manifest.json").read_text())
+    manifest["features"] = manifest["features"] + ["extra_a", "extra_b"]
+    (path / "manifest.json").write_text(json.dumps(manifest))
+    P.clear_cache()
+    with pytest.raises(ValueError, match="First divergence at position 21"):
+        P.load_bundle(bundle.run_id)
+
+
+def test_combine_members_reproduces_the_historical_accumulation():
+    """train.py and predict_raw share one combine function. It must still give
+    exactly what `test_pred += p / n` gave, or the saved arrays stop matching."""
+    import numpy as np
+
+    from src.utils import combine_members
+
+    rng = np.random.default_rng(0)
+    preds = [rng.random(10_000) for _ in range(5)]
+    historical = np.zeros(10_000)
+    for p in preds:
+        historical += p / len(preds)
+    assert np.array_equal(combine_members(preds, [0.2] * 5), historical)
+    # A single member at weight 1.0 (full_refit) comes back untouched.
+    assert np.array_equal(combine_members(preds[:1], [1.0]), preds[0])
+    # Unequal weights are a plain weighted sum (a future blend).
+    assert np.allclose(combine_members(preds[:2], [0.7, 0.3]), 0.7 * preds[0] + 0.3 * preds[1])
