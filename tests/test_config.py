@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import subprocess
 import sys
+from pathlib import Path
 
 import pytest
 
@@ -83,10 +84,22 @@ def test_missing_data_fails_on_call_not_on_import(monkeypatch, tmp_path):
 
 
 def test_config_paths_are_all_under_the_repo():
-    """Nothing should resolve outside the checkout when not on Kaggle."""
+    """Nothing should resolve outside the checkout when not on Kaggle.
+
+    Read from a fresh interpreter: inside the test session, conftest points the
+    writable paths at a tmp dir, so `C` here holds the redirects, not the
+    defaults this test is about.
+    """
     assert not C.ON_KAGGLE, "this test suite assumes it is not running on Kaggle"
-    for path in (C.MODEL_DIR, C.EXPERIMENTS, C.SUBMISSIONS, C.FIGURES, C.PRED_LOG):
-        assert C.ROOT in path.parents or path.parent == C.ROOT, f"{path} escapes {C.ROOT}"
+    done = run_python(
+        "from src import config as C\n"
+        "for p in (C.MODEL_DIR, C.EXPERIMENTS, C.SUBMISSIONS, C.REPORTS, C.FIGURES, C.PRED_LOG):\n"
+        "    print(p)"
+    )
+    assert done.returncode == 0, done.stderr
+    for line in done.stdout.split():
+        path = Path(line)
+        assert C.ROOT in path.parents, f"{path} escapes {C.ROOT}"
 
 
 def test_new_production_paths_exist():

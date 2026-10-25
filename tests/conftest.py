@@ -44,6 +44,24 @@ EXPECTED_LEVELS = {
 }
 
 
+@pytest.fixture(autouse=True)
+def _writes_go_to_tmp(tmp_path, monkeypatch):
+    """Every test writes into its own tmp dir, never the working tree.
+
+    The fixtures that train a model redirect experiments/, models/, the CSV log
+    and MLflow themselves. Two outputs were reachable without them and leaked:
+    the API appends each scored row to PRED_LOG, and a drift report is written
+    under REPORTS. Over a day of test runs that put ~100 fixture requests into
+    the real logs/predictions.jsonl -- which `make drift` then read as live
+    traffic -- and 19 HTML reports into reports/. Redirecting them here, for
+    every test, means a new test cannot reintroduce it by forgetting.
+    """
+    monkeypatch.setattr(C, "PRED_LOG", tmp_path / "logs" / "predictions.jsonl")
+    monkeypatch.setattr(C, "REPORTS", tmp_path / "reports")
+    monkeypatch.setattr(C, "FIGURES", tmp_path / "reports" / "figures")
+    C.PRED_LOG.parent.mkdir(parents=True, exist_ok=True)
+
+
 @pytest.fixture(scope="session")
 def synthetic_raw() -> pd.DataFrame:
     """200 seeded rows in the raw Kaggle shape, with the original header casing.
