@@ -30,3 +30,16 @@ requirements.txt
 # os
 .DS_Store
 Thumbs.db
+
+# model bundles, tracking store and serving logs
+# A fold bundle is ~30MB (5 boosters), so it never goes in git — the model
+# channel is a GitHub Release, and MLflow holds the run that produced it.
+models/
+mlruns/
+mlflow.db
+logs/
+reports/drift_*.html
+
+# dvc keeps pointers in git; the cache and tmp dirs stay local
+.dvc/cache/
+.dvc/tmp/

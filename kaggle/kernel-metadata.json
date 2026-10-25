@@ -8,6 +8,6 @@
   "enable_gpu": false,
   "enable_internet": false,
   "dataset_sources": ["YOUR_KAGGLE_USERNAME/predict-customer-churn-utils"],
-  "competition_sources": ["CHANGE-ME"],
+  "competition_sources": ["playground-series-s6e3"],
   "kernel_sources": []
 }
