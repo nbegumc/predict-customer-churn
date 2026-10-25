@@ -68,7 +68,7 @@ def _mirror_to_mlflow(run_id: str, score: float) -> None:
         with mlflow.start_run(run_id=found.loc[0, "run_id"]):
             mlflow.log_metric("public_lb", score)
         print(f"  (mirrored public_lb to MLflow run {found.loc[0, 'run_id'][:8]})")
-    except Exception as exc:  # noqa: BLE001 - never let tracking break the log
+    except Exception as exc:  # never let tracking cost you a recorded LB score
         print(f"  (MLflow mirror skipped: {type(exc).__name__}: {exc})")
 
 

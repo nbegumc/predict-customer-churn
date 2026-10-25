@@ -78,9 +78,9 @@ def test_metrics_endpoint_exposes_all_five(client):
 
 def test_out_of_range_counter_fires_without_rejecting(client):
     """Tier two: unusual is served and counted, not refused."""
-    before = A.STATE["out_of_range"].get("monthlycharges", 0)
+    before = A._out_of_range_counts().get("monthlycharges", 0)
     assert client.post("/predict", json={**EXAMPLE, "monthlycharges": 130.0}).status_code == 200
-    assert A.STATE["out_of_range"]["monthlycharges"] > before
+    assert A._out_of_range_counts()["monthlycharges"] > before
     assert 'churn_out_of_range_inputs_total{field="monthlycharges"}' in client.get("/metrics/").text
 
 
