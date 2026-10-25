@@ -174,3 +174,22 @@ def test_evidently_is_not_in_the_serving_import_path():
     )
     assert done.returncode == 0, done.stderr
     assert done.stdout.strip() == ""
+
+
+def test_a_drift_report_on_a_fresh_store_keeps_its_artifacts_beside_it(tmp_path, monkeypatch):
+    """The monitor creates its experiment through the same helper as training,
+    so a drift report against a fresh store cannot leak into the repo's mlruns/."""
+    db_dir = tmp_path / "store"
+    db_dir.mkdir()
+    monkeypatch.setattr(C, "MLFLOW_TRACKING_URI", f"sqlite:///{db_dir / 'mlflow.db'}")
+    monkeypatch.setattr(C, "MLFLOW_EXPERIMENT", "drift-isolation")
+    html = tmp_path / "report.html"
+    html.write_text("<html></html>")
+
+    repo_mlruns = C.ROOT / "mlruns"
+    before = set(repo_mlruns.glob("*/*")) if repo_mlruns.exists() else set()
+    M._log_to_mlflow({"drifted_columns": 0, "current_rows": 1}, html)
+    after = set(repo_mlruns.glob("*/*")) if repo_mlruns.exists() else set()
+
+    assert after == before
+    assert list((db_dir / "drift-isolation").glob("*/artifacts/report.html"))

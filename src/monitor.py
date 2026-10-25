@@ -30,6 +30,7 @@ import pandas as pd
 from . import config as C
 from .data import normalise_columns
 from .features import DERIVED
+from .utils import use_experiment
 
 REFERENCE = C.PROCESSED / "reference.parquet"
 REFERENCE_ROWS = 10_000
@@ -183,7 +184,7 @@ def _log_to_mlflow(summary: dict, html) -> None:
         return
     try:
         mlflow.set_tracking_uri(C.MLFLOW_TRACKING_URI)
-        mlflow.set_experiment(C.MLFLOW_EXPERIMENT)
+        use_experiment(mlflow)  # artifacts beside the store, not in the cwd
         with mlflow.start_run(run_name=f"drift_{datetime.now().astimezone():%m%d_%H%M%S}"):
             mlflow.set_tag("kind", "drift-report")
             mlflow.log_metrics({k: v for k, v in summary.items() if isinstance(v, (int, float))})
