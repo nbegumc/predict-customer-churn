@@ -480,6 +480,44 @@ this is a synthetic expansion of a small tabular table, where nothing that is
 not a tree comes close. What generalises is the test, not the verdict — and the
 test is two numbers that are already free on every run.
 
+### `1024_141318_lgbm` — the champion, repackaged so it can be served
+
+- **Hypothesis:** not an experiment. The same config as `0904_202729_lgbm`,
+  re-run so the fitted boosters land on disk. `src/train.py` had always bound
+  `fitted` per fold and dropped it, keeping only prediction arrays — so nothing
+  this repo ever trained could be loaded again. The question this run actually
+  answers is whether the champion was reproducible at all, which nothing had
+  tested.
+- **Change:** no model change, no feature change, no fold change. `train.py` now
+  saves each fold's booster, records the *resolved* params (previously written
+  only when `--params` was passed, so the champion's hyperparameters existed
+  nowhere but the source at HEAD), and writes `models/<run_id>/manifest.json`.
+  Run with `--full-refit`, adding a second strategy to the bundle.
+- **Result:** OOF **0.916391**, and both `oof_*.npy` and `test_*.npy` are
+  **bitwise identical** to the September arrays. Per-fold scores match to all
+  six printed digits: 0.916051 / 0.917028 / 0.916510 / 0.917571 / 0.914852.
+- **Read:** a stronger result than it looks. Seven weeks later, on a different
+  day, with the hyperparameters never having been persisted, `seed_everything`
+  plus the frozen folds plus an untouched `src/models/lgbm.py` reproduce the run
+  exactly — so `SEED = 42` and the frozen CV are doing real work, not decorative
+  work. It also settles **what the deployable artifact is**: `test_*.npy` is the
+  mean of the five fold models (`train.py` accumulates `/= len(folds)`), and it
+  reproduced bitwise, so the saved fold bundle *is* the thing that scored public
+  LB 0.91393. OOF 0.916391 is measured on a single fold model per row, which
+  makes it a **conservative** estimate of the fold average rather than a
+  description of it — worth keeping straight when the two serving strategies get
+  compared.
+- **Keep / drop:** keep. `models/1024_141318_lgbm/` is the serving bundle
+  (35.6MB: five fold boosters plus the refit). Early-stopped rounds, recorded
+  for the first time: **712 / 937 / 833 / 822 / 873**, mean 835 — so the full
+  refit used 1044 = `round(835 x 5/4)`, the standard correction for a fit that
+  sees 1/(k-1) more data than a fold model did.
+- **Note on run ids:** `run_id` is now allocated at the *start* of `run()`
+  rather than after the fold loop, because each fold's model needs a directory
+  to be written into. Its timestamp therefore shifts by roughly the training
+  time (~2 min here). Ids before this run mean run-end; ids after mean
+  run-start.
+
 ## Dead ends
 
 Anything tried that did not work, so it is not tried twice. One row each.

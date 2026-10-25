@@ -8,3 +8,4 @@ run_id,timestamp,model,cv_score,public_lb,folds,notes
 0905_015321_blend,2026-09-05 01:53,blend,0.916567,,13feb807,"blend of 0904_202729_lgbm, 0904_210834_catboost, 0905_015118_linear"
 0905_020138_mlp,2026-09-05 02:01,mlp,0.912762,,13feb807,"MLPClassifier (128,64) relu/adam on the same one-hot + standardised design matrix as 0905_015118_linear, same 21 features — idea 3 again, but competitive: the linear model's dissent was unusable because it trailed lgbm by 0.0084"
 0905_020201_blend,2026-09-05 02:02,blend,0.916567,,13feb807,"blend of 0904_202729_lgbm, 0904_210834_catboost, 0905_020138_mlp"
+1024_141318_lgbm,2026-10-24 14:15,lgbm,0.916391,,13feb807,repackage: persist fold models + resolved params + manifest for serving; no model or feature change vs 0904_202729_lgbm
