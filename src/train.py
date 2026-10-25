@@ -19,12 +19,13 @@ import pandas as pd
 from . import config as C
 from . import cv as CV
 from .data import load, load_sample_submission
-from .features import build_features, fold_features
+from .features import DERIVED, build_features, fold_features
 from .models.catboost import CatBoostModel
 from .models.lgbm import LGBMModel
 from .models.linear import LinearModel
 from .models.mlp import MLPModel
 from .utils import (
+    combine_members,
     git_sha,
     log_experiment,
     mlflow_run,
@@ -86,6 +87,10 @@ def _write_manifest(
         "fold_scores": [round(float(s), 6) for s in fold_scores],
         "best_iterations": best_iters,
         "features": list(features),
+        # What a caller must supply: the features minus the ones
+        # add_telco_features derives. Pinned here rather than recomputed at
+        # serving time, so an old bundle stays readable if DERIVED ever changes.
+        "raw_columns": [c for c in features if c not in DERIVED],
         "categories": cats,
         "dtypes": {c: str(train[c].dtype) for c in features},
         "params": resolved,
@@ -135,7 +140,7 @@ def run(
         # NaN marks "never validated" — time-based folds do not cover the earliest
         # rows, and those must be masked out rather than silently scored as zero.
         oof = np.full(len(train), np.nan)
-        test_pred = np.zeros(len(test))
+        test_preds: list[np.ndarray] = []
         importances = []
         best_iters: list[int] = []
         fold_scores: list[float] = []
@@ -154,7 +159,7 @@ def run(
                     X_tr, y[tr_pos], X_va, y[va_pos], features=feats
                 )
             oof[va_pos] = inverse(fitted.predict(X_va))
-            test_pred += inverse(fitted.predict(X_te)) / len(folds)
+            test_preds.append(inverse(fitted.predict(X_te)))
             if hasattr(fitted, "importance"):
                 importances.append(fitted.importance())
             # Same hasattr idiom as importance above. Until now every fitted model
@@ -168,6 +173,10 @@ def run(
             ml.log_metric(f"fold_{C.METRIC}", fold_scores[-1], step=fold)
             if best_iters:
                 ml.log_metric("fold_best_iteration", best_iters[-1], step=fold)
+
+        # The same function serving uses, so test_*.npy is by construction what
+        # the fold_average strategy returns.
+        test_pred = combine_members(test_preds, [1.0 / len(folds)] * len(folds))
 
         scored = ~np.isnan(oof)
         cv_score = CV.score(y_raw[scored], oof[scored])
