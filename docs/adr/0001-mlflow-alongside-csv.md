@@ -68,5 +68,13 @@ Azure ML's own SDK would have been a lock-in; MLflow against Azure ML is not.
   absolute host paths. The first compose file pointed the server at a different
   database entirely, so the UI never showed a host run. Its host port is 5001:
   macOS AirPlay Receiver holds 5000.
+- **Artifacts follow the database, not the working directory.** MLflow's
+  default puts a new experiment's artifacts in `./mlruns` relative to wherever
+  the process runs. Every test fixture pointed the tracking URI at a tmp
+  database, but the artifacts still landed in the repo -- about 1,100 test runs
+  and 226MB in a day. `utils.use_experiment` now creates experiments with their
+  artifact location derived from the tracking URI, so moving the database moves
+  everything. Fixing it once at the source, rather than in each fixture, is what
+  keeps the next fixture from reintroducing it.
 - **Revisit when:** more than one person logs runs, at which point SQLite on a
   bind mount stops being adequate and the server needs Postgres.
