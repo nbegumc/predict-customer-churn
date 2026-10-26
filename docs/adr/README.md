@@ -23,6 +23,7 @@ exactly that reason.
 | [0010](0010-dvc-scoped-to-experiments.md) | DVC for `experiments/` only | Azure Blob + ML Data Assets |
 | [0011](0011-local-compose-only.md) | Local compose only; deployment documented | Azure Container Apps |
 | [0012](0012-train-serve-parity.md) | Train/serve dtype parity as a discipline | *(none — a practice, not a tool)* |
+| [0013](0013-dashboard-from-aggregates.md) | Business dashboard over fixed aggregate CSVs | Power BI |
 
 Numbering is chronological and permanent. A superseded ADR is marked, not
 deleted, because the reasoning is the point.

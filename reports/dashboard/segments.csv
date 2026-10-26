@@ -1,0 +1,15 @@
+dimension,segment,customers,leavers,churn_rate,leaver_revenue
+Contract,Month-to-month,298918,125708,0.4205,10164108.56
+Contract,One year,108333,6243,0.0576,576874.25
+Contract,Two year,186943,1866,0.01,178153.15
+Tenure,0-12 months,152646,75399,0.4939,5748194.46
+Tenure,13-24 months,86024,24584,0.2858,2056893.9
+Tenure,25-48 months,127988,21842,0.1707,1945777.6
+Tenure,49+ months,227536,11992,0.0527,1168270.0
+Internet service,DSL,181081,18663,0.1031,904942.0
+Internet service,Fiber optic,272386,113140,0.4154,9971515.96
+Internet service,No,140727,2014,0.0143,42678.0
+Payment method,Bank transfer (automatic),121360,9356,0.0771,769243.75
+Payment method,Credit card (automatic),133705,9270,0.0693,747998.2
+Payment method,Electronic check,215372,105328,0.4891,8824750.81
+Payment method,Mailed check,123757,9863,0.0797,577143.2

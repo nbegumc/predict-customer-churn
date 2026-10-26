@@ -18,6 +18,7 @@ variables, because the open-source choices were made with that in mind.
 | Drift | Evidently, batch | **Azure ML Model Monitoring** | Same shape (reference + collected inference data, on a schedule). Data Collector replaces the JSONL append. |
 | Data versioning | DVC, local remote | **Blob remote** / **ML Data Assets** | `dvc remote add -d azure azure://...`. Pointers unchanged. |
 | Orchestration | `make` + CI | **Azure ML Pipelines** | Would replace `src.train.run` as the entry point — the biggest change on this list. |
+| Business dashboard | Claude Artifact over aggregate CSVs | **Power BI** | Same CSVs from Blob; the sliders become what-if parameters. |
 | Compute | a laptop | **Azure ML Compute** | `make data` + `src.train` on a compute target. |
 
 ## The three that are not one-liners
