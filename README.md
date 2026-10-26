@@ -26,6 +26,23 @@ public leaderboard can resolve, and it would mean a second model to version and
 champion retrained so its fold models are saved; it reproduces the champion's
 predictions **bitwise**, so it is provably the model behind LB 0.91393.
 
+## What it's worth
+
+Churn costs this operator **£10.9M of monthly recurring revenue** — 27.9% of
+MRR against a 22.5% headcount churn rate, because churners pay 1.33× what
+stayers do. The served model finds **39% of that revenue in the top 10% of a
+ranked call list** (83.1% precision, 3.7× lift), and it is calibrated well
+enough to turn a probability into a budget decision: a top-decile campaign
+breaks even at a **0.56% save rate**, and ranking by expected value rather than
+by probability reaches **£126k/month more at-risk revenue from the same number
+of calls**.
+
+[`docs/use-case.md`](docs/use-case.md) is the business case — the decision, the
+economics, and the four tiers of measurement, including the randomised holdout
+that is the only honest way to measure whether calling anyone actually helps.
+[`notebooks/04_business_case.ipynb`](notebooks/04_business_case.ipynb)
+reproduces every number in it from saved out-of-fold predictions.
+
 Everything tried, kept or dropped is in [`experiments.md`](experiments.md),
 including a **Dead ends** table. Cross-validation is stratified 5-fold, decided
 on 2026-09-02 from measurements and frozen since: every saved prediction carries
@@ -212,15 +229,19 @@ src/
   predict.py     the one inference path, parity-tested against training
   api.py         the FastAPI service
   monitor.py     drift reports against the training data
-notebooks/       EDA, baseline, serving-strategy comparison, final write-up
+notebooks/       EDA, baseline, serving strategy, business case, final write-up
 tests/           92 tests; fixtures/ holds a 200-row synthetic dataset
-docs/            architecture, serving, deployment, 12 ADRs, Azure mapping
+docs/            architecture, serving, use case, deployment, 12 ADRs, Azure mapping
 experiments.md   why each run was kept or dropped
 learnings.md     the statistics behind the decisions
 ```
 
 ## Further reading
 
+- [`docs/use-case.md`](docs/use-case.md) — what the model is for, what a
+  retention campaign on it is worth, and the experiment that would measure
+  whether it worked. Start here if you want the business case rather than the
+  pipeline.
 - [`docs/adr/`](docs/adr/README.md) — twelve decisions, each with its Azure
   equivalent and what it would cost to change. Start with
   [0012](docs/adr/0012-train-serve-parity.md) before changing feature code: three
@@ -228,7 +249,8 @@ learnings.md     the statistics behind the decisions
 - [`docs/azure-mapping.md`](docs/azure-mapping.md) — every tool here and what
   changes to run it on Azure. Most of it is one environment variable.
 - [`notebooks/99_final_writeup.ipynb`](notebooks/99_final_writeup.ipynb) — the
-  model in business terms: who to call first, and how far down the list to go.
+  competition write-up: the noise floor that rejected most ideas, the blend
+  diagnostic, and SHAP on the served model.
 
 ## Working in Kaggle kernels (for their GPU)
 
