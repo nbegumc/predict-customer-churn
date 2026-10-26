@@ -9,6 +9,11 @@ the model's saved out-of-fold predictions (each customer scored by a model that
 never saw them during training). Nothing is re-trained and nothing is quoted from
 memory.
 
+To try other assumptions than the ones below, the
+[Churn Campaign Planner](https://claude.ai/artifact/Um1wxkVSasxiBG2831YXKa)
+dashboard (private; ask for access) recomputes §3–§7 as you move the sliders.
+At its default settings it shows the same numbers as this document.
+
 ## Summary
 
 - **The problem:** customers who leave take **£10.9M of monthly revenue** with
@@ -414,3 +419,9 @@ uv run jupyter lab notebooks/04_business_case.ipynb
 The notebook first checks that the served model's predictions are **bitwise
 identical** to champion run `0904_202729_lgbm`, so the numbers describe the model
 that scored public LB 0.91393, not a re-fit that resembles it.
+
+The dashboard's data comes from the same inputs and makes the same check:
+
+```bash
+uv run python -m scripts.build_dashboard_data   # -> reports/dashboard/*.csv
+```

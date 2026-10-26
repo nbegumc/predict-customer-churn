@@ -113,7 +113,12 @@ make mlflow-ui             # tracking UI on :5001 without docker (5000 is macOS 
 make reference             # build the drift baseline from data/raw/train.csv (once)
 make drift                 # live traffic vs that baseline -> reports/drift_<date>.html
 make drift SINCE=7d
+
+uv run python -m scripts.build_dashboard_data   # campaign planner CSVs -> reports/dashboard/
 ```
+
+The dashboard does not read those CSVs from the repo: after rebuilding them
+(a new served model, say), re-upload them to the dashboard. See ADR 0013.
 
 `experiments/` is versioned with DVC, because it is gitignored, 71MB, declared
 immutable in CLAUDE.md, and otherwise protected by nothing but this disk.

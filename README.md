@@ -43,6 +43,12 @@ that is the only honest way to measure whether calling anyone actually helps.
 [`notebooks/04_business_case.ipynb`](notebooks/04_business_case.ipynb)
 reproduces every number in it from saved out-of-fold predictions.
 
+For business users, the [Churn Campaign Planner](https://claude.ai/artifact/Um1wxkVSasxiBG2831YXKa)
+dashboard (private; ask for access) puts the same economics behind sliders: call
+depth, save rate, cost per call and months retained. It reads four aggregate CSVs
+in `reports/dashboard/`, built by `scripts/build_dashboard_data.py`; why it is
+built that way is [ADR 0013](docs/adr/0013-dashboard-from-aggregates.md).
+
 Everything tried, kept or dropped is in [`experiments.md`](experiments.md),
 including a **Dead ends** table. Cross-validation is stratified 5-fold, decided
 on 2026-09-02 from measurements and frozen since: every saved prediction carries
@@ -231,7 +237,7 @@ src/
   monitor.py     drift reports against the training data
 notebooks/       EDA, baseline, serving strategy, business case, final write-up
 tests/           92 tests; fixtures/ holds a 200-row synthetic dataset
-docs/            architecture, serving, use case, deployment, 12 ADRs, Azure mapping
+docs/            architecture, serving, use case, deployment, 13 ADRs, Azure mapping
 experiments.md   why each run was kept or dropped
 learnings.md     the statistics behind the decisions
 ```
@@ -242,7 +248,7 @@ learnings.md     the statistics behind the decisions
   retention campaign on it is worth, and the experiment that would measure
   whether it worked. Start here if you want the business case rather than the
   pipeline.
-- [`docs/adr/`](docs/adr/README.md) — twelve decisions, each with its Azure
+- [`docs/adr/`](docs/adr/README.md) — thirteen decisions, each with its Azure
   equivalent and what it would cost to change. Start with
   [0012](docs/adr/0012-train-serve-parity.md) before changing feature code: three
   bugs live in the gap between training and serving, and that ADR measures each.
